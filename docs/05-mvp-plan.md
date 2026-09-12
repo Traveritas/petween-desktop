@@ -81,15 +81,19 @@
 - 重连差集在基线封印（1s settle）后计算——回环基线毫秒级到达，此窗口只封差集不阻塞事件。
 - 临时假 DSH 脚本（`.fake-dsh.tmp.mjs`）验完即删，不入库；复验时可参考 docs/03 §2 帧格式重建。
 
-## Phase 5：系统集成
+## Phase 5：系统集成（✅ 2026-09-12 完成；开机自启重启系统生效待用户复验）
 
-- [ ] 单实例锁 + `second-instance` 唤起设置窗
-- [ ] 托盘：打开设置 / 退出 / DSH 连接状态显示 / 开机自启勾选（**开/关用完全相同 path/args**，04 号文档 §4）
-- [ ] settings 窗口 close→hide；`window-all-closed` 不退出
-- [ ] `display-metrics-changed` / 分辨率变化重新铺满
-- [ ] （可选）「从 DSH 导入数据」菜单项：`migrateLegacyHome(~/.dsh/petween → userData)`
+- [x] 单实例锁 + `second-instance` 唤起设置窗（✅ 真机验证：二次启动立即退出、首实例弹设置窗）
+- [x] 托盘：打开设置 / 退出 / DSH 连接状态显示（bridge onStatus → 菜单重建）/ 开机自启勾选（**开/关用完全相同 path/args**，login-item.ts 显式空 args；dev 下禁用勾选防注册裸 electron.exe）；`resources/tray.png` 32x32 生成入库；Tray 实例模块级引用防 GC
+- [x] settings 窗口 close→hide（`shouldHideOnClose` 谓词注入，托盘退出经 before-quit 翻转）；`window-all-closed` 不退出（空处理器）
+- [x] `display-metrics-changed` / 分辨率变化重新铺满（Phase 2 已做：具名监听器 + closed 移除）
+- [x] 「从 DSH 导入数据」菜单项：**自写 `legacy-import.ts`**（copy-if-absent：assets/assets.json/animations/pets，绝不覆盖已有；config 不动、导入后在编辑器里手选宠物预设）。原因：petween 的 `migrateLegacyHome` 目标目录存在即 skip——桌面版首启后 dataRoot 必然存在，该函数无法用于运行时导入（docs/02 §2 清单里它的适用场景是 DSH 侧目录改名）。确认对话框 + 结果对话框。
 
-**验收**：二次启动唤起设置窗；开机自启勾选后重启系统生效（路径含空格用户名场景测试或至少代码审查确认引号处理）；托盘退出干净（无残留进程/宠物窗）。
+**验收（✅ 2026-09-12 真机，自动化部分）**：二次启动唤起设置窗 ✓；托盘图标存在（洋红圆点）+ DSH 状态行 ✓；进程清理干净（0 electron 残留）✓。**待用户复验**：开机自启勾选后重启系统生效（路径含空格场景——login-item.ts 用 Electron 44 的 CVE-2026-34768 修复后版本，引号处理由 API 保证）；托盘菜单各入口手工点一遍；「从 DSH 导入」真实数据跑一次（本机 `~/.dsh/petween` 有 Aug-28 数据可试）。
+
+**实施记录**：
+- 托盘模板纯函数化（`tray-menu.ts`，action id → handler 映射在 tray.ts），状态组合 2 用例；legacy-import 3 用例（copy/skip 边界 + canImport 判定）。
+- 设置窗两种模式都直接 loadURL local-server（不是 vite 页面，天然同源，无需代理）。
 
 ## Phase 6：构建分发
 
