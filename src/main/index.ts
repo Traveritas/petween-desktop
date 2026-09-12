@@ -10,6 +10,9 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 import { DEV_LOCAL_PORT } from './dev-port'
+import { createDshBridge } from './dsh-bridge/bridge'
+import { describeDsh } from './dsh-bridge/dsh-client'
+import { connectDshSocket } from './dsh-bridge/ws-socket'
 import { startPetweenLocalServer } from './local-server'
 import { attachPointerThrough } from './pointer-through'
 import { createOverlayWindow, loadOverlayPage } from './overlay-window'
@@ -34,7 +37,23 @@ async function bootstrap(): Promise<void> {
   })
   console.log(`[petween-desktop] local-server on http://127.0.0.1:${server.port} (data: ${dataRoot})`)
 
+  // DSH state bridge (docs/05 Phase 4): aggregate mode — no CurrentSessionSource,
+  // petween's §14.5 fallback subscribes the overlay to every session's stream.
+  // Port: explicit env override for now; the settings entry arrives in Phase 5.
+  const bridge = createDshBridge({
+    relay: server.relay,
+    getPort: () =>
+      process.env.PETWEEN_DSH_PORT ? Number.parseInt(process.env.PETWEEN_DSH_PORT, 10) : 3080,
+    connect: connectDshSocket,
+    describe: describeDsh,
+    log: (message) => console.log(message),
+    onStatus: (status, detail) =>
+      console.log(`[petween-dsh] ${status}${detail === undefined ? '' : ` (${detail})`}`),
+  })
+  bridge.start()
+
   app.on('quit', () => {
+    bridge.close()
     void server.close()
   })
 

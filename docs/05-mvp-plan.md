@@ -64,16 +64,22 @@
 - renderer 信号节流 50ms + snapshot 推送/pointerdown/pointerup 强制直发 + 1s keep-alive。
 - preload 在 sandbox 下必须 CJS（Phase 0 已固），IPC payload 在 main 侧做形状校验（不可信输入）。
 
-## Phase 4：DSH 状态桥
+## Phase 4：DSH 状态桥（✅ 2026-09-12 完成；真 DSH 联测待用户跑 `dsh web` 复验）
 
-- [ ] `src/main/dsh-bridge/`：按 03 号文档实现——两条 WS（mux + host，**必须双流**）+ 帧解包（server-request 信封）+ 9 条契约转换 + `StateChannelHost` 适配器接到 attachStateChannel
-- [ ] 连接生命周期：官方参数退避（500ms 基数 ×2 至 10s 带抖动、3s 开流握手）、`ws.ping()` 20-30s 心跳 2 次无 pong 判死、重连后 subscribed 集对照清差集
-- [ ] 端口发现：设置项 → 默认 3080 → 探活 `POST /api/host.describe`
-- [ ] 降级：DSH 不在时退避循环不产事件（宠物保持 idle 纯装饰）；托盘菜单显示连接状态
-- [ ] 状态源：MVP 用 **aggregate 模式**（不装 CurrentSessionSource，petween §14.5 fallback 自动生效）；「跟随 DSH 当前会话」记为后续增强
-- [ ] 单测：帧转换纯函数逐条对照 03 号文档 §7 的 9 条转换；用录制帧 fixture 驱动桥的有限状态机（连接/重连/清差集）
+- [x] `src/main/dsh-bridge/`：按 03 号文档实现——`frames.ts`（信封解包 + mux/host 帧解释，docs/03 §7 的 9 条转换落点）+ `backoff.ts`（官方退避参数）+ `ws-socket.ts`（ws 薄包装，JSON 文本帧/无 Origin/仅 ping）+ `dsh-client.ts`（describe 探活 HTTP 信封）+ `bridge.ts`（生命周期 FSM）；两条 WS（mux + host，**双流**）经 Phase 1 的 state-relay 接到 attachStateChannel
+- [x] 连接生命周期：退避（500ms×2 至 10s 带抖动、3s 开流握手）、`ping()` 25s 心跳两拍无 pong 判死、重连后 subscribed 集对照清差集（基线封印窗口 1s）
+- [x] 端口发现：`PETWEEN_DSH_PORT` 环境变量 → 默认 3080 → 探活 `POST /api/host.describe`（设置项入口 Phase 5 接）
+- [x] 降级：DSH 不在时退避循环不产事件（宠物 idle 纯装饰）；状态经 `onStatus` 回调输出（Phase 5 托盘接）
+- [x] 状态源：aggregate 模式（不装 CurrentSessionSource，petween §14.5 fallback 自动生效）
+- [x] 单测：帧转换逐条对照 03 号文档（信封/解释/忽略集 14 用例）+ 退避参数边界 + FSM fixture 驱动（降级循环/双流接线/订阅差集/心跳判死/握手超时/close 清理 8 用例）
 
-**验收（真机）**：`dsh web` 在跑时，DSH 里发起一个任务：思考→宠物 thinking、工具调用→tool 状态、完成→success→回 idle；等待审批→waiting；DSH 重启→宠物回 idle 无残留状态；杀掉 DSH→退避重连日志正常、宠物持续可交互。
+**验收（✅ 2026-09-12 假 DSH 真机端到端）**：起最小假 DSH（实现 describe + 双 WS 流规格帧）→ 桥经**真实 WebSocket/HTTP** 连接 → SSE 流完整走出 `turn-start → thinking → tool-start(command) → tool-end → success → idle`（每帧对应 docs/03 §2 转换正确；idle 时间戳走本机时钟验证第 7 条）；杀假 DSH → 探测退避 → 重启 → 自动重连 + 基线重放（快照保留 lastBySession 验证）。**真 DSH 联测（`dsh web` 在跑时思考→thinking、完成→success、DSH 重启→无残留）待用户复验。**
+
+**实施记录**：
+- 帧解释与 FSM 全部纯函数/注入式（socket/describe/时钟可换 fake），fake-timer 驱动 8 个 FSM 场景。
+- 心跳判死阈值 `>=` 两倍间隔（两拍无 pong 即判，比 `>` 严格一拍对齐官方语义）。
+- 重连差集在基线封印（1s settle）后计算——回环基线毫秒级到达，此窗口只封差集不阻塞事件。
+- 临时假 DSH 脚本（`.fake-dsh.tmp.mjs`）验完即删，不入库；复验时可参考 docs/03 §2 帧格式重建。
 
 ## Phase 5：系统集成
 
