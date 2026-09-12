@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { DEV_LOCAL_PORT } from './src/main/dev-port'
 
 /**
  * petween is consumed as raw TS source from the git submodule (a link:
@@ -12,6 +13,13 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
  */
 const petweenSrc = fileURLToPath(new URL('./vendor/petween/src', import.meta.url))
 const rendererRoot = fileURLToPath(new URL('./src/renderer', import.meta.url))
+
+/**
+ * Dev same-origin bridge (docs/02 §1): the overlay page is served by this
+ * dev server (HMR), so its root-relative petween fetches must be proxied to
+ * the main-process local-server on the fixed dev port.
+ */
+const localServerTarget = `http://127.0.0.1:${DEV_LOCAL_PORT}`
 
 export default defineConfig({
   main: {
@@ -39,6 +47,12 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
       alias: { petween: petweenSrc },
+    },
+    server: {
+      proxy: {
+        '/api/petween': { target: localServerTarget },
+        '/petween-assets': { target: localServerTarget },
+      },
     },
     build: {
       rollupOptions: {

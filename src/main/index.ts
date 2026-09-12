@@ -3,14 +3,15 @@
  * port orchestration, window creation. All business logic lives in
  * Electron-free modules (local-server, routes-host, state-relay, ...).
  *
- * Phase 1: boots the petween local-server (host assembly + editor page +
- * state channel) alongside the Phase 0 hello window. The overlay window
- * replaces the hello window in Phase 2.
+ * Phase 2: boots the petween local-server and the transparent always-on-top
+ * overlay window (dev: vite dev server + API proxy; prod: same-origin
+ * local-server for both the page and the API).
  */
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
 import { join } from 'node:path'
 import { DEV_LOCAL_PORT } from './dev-port'
 import { startPetweenLocalServer } from './local-server'
+import { createOverlayWindow, loadOverlayPage } from './overlay-window'
 
 async function bootstrap(): Promise<void> {
   const isDev = !app.isPackaged
@@ -23,38 +24,24 @@ async function bootstrap(): Promise<void> {
       ? DEV_LOCAL_PORT
       : 0
 
-  const server = await startPetweenLocalServer({ dataRoot, editorBundlePath, port })
+  const server = await startPetweenLocalServer({
+    dataRoot,
+    editorBundlePath,
+    // Prod serves the built overlay page from the local-server (same origin).
+    rendererDistDir: isDev ? undefined : join(__dirname, '../renderer'),
+    port,
+  })
   console.log(`[petween-desktop] local-server on http://127.0.0.1:${server.port} (data: ${dataRoot})`)
 
   app.on('quit', () => {
     void server.close()
   })
 
-  createHelloWindow()
-}
-
-function createHelloWindow(): void {
-  const win = new BrowserWindow({
-    width: 480,
-    height: 360,
-    title: 'Petween Desktop',
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: true,
-      contextIsolation: true,
-    },
+  const overlay = createOverlayWindow()
+  loadOverlayPage(overlay, {
+    devUrl: process.env.ELECTRON_RENDERER_URL,
+    serverPort: server.port,
   })
-  win.once('ready-to-show', () => win.show())
-  win.webContents.on('preload-error', (_event, preloadPath, error) => {
-    console.error(`[petween-desktop] preload failed to load (${preloadPath}):`, error)
-  })
-
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/overlay/index.html`)
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/overlay/index.html'))
-  }
 }
 
 app.whenReady().then(() => {

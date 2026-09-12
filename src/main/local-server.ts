@@ -25,12 +25,20 @@ import { attachStateChannel, type StateChannel } from 'petween/host/state-channe
 import { ensurePresetAuthority } from 'petween/host/migrate-v2'
 import { createRouteTable } from './routes-host'
 import { createStateRelay, type StateRelay } from './state-relay'
+import { registerOverlayStatic } from './overlay-static'
 
 export interface LocalServerOptions {
   /** Independent data root (userData/petween-home); structure mirrors $DSH_HOME/petween/. */
   dataRoot: string
   /** Absolute path to the prebuilt vendor/petween/lib/editor.js. */
   editorBundlePath: string
+  /**
+   * electron-vite renderer build dir (out/renderer). When set, the server
+   * also serves the overlay page + hashed assets so the prod overlay window
+   * stays same-origin with the API (docs/02 §1). Dev omits it — the overlay
+   * loads from the vite dev server through the proxy instead.
+   */
+  rendererDistDir?: string
   /** 0/undefined = OS-assigned random port (prod); dev passes a fixed port. */
   port?: number
 }
@@ -100,6 +108,10 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
   const disposeEditor = registerEditorPage(table.host, {
     loadBundle: () => readFile(options.editorBundlePath),
   })
+  const disposeOverlayStatic =
+    options.rendererDistDir === undefined
+      ? null
+      : registerOverlayStatic(table.host, options.rendererDistDir)
   const relay = createStateRelay(table.host.webServer)
   const stateChannel = attachStateChannel(relay.host)
 
@@ -117,6 +129,7 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
       return new Promise<void>((resolve, reject) => {
         stateChannel.dispose()
         disposeEditor()
+        disposeOverlayStatic?.()
         disposeRoutes()
         server.close((error) => (error === undefined ? resolve() : reject(error)))
       })
