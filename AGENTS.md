@@ -59,7 +59,8 @@ pnpm test                                                                # 壳�
 
 - 2026-09-12：仓库建立，petween submodule 锁定 b0763e1，评估/规格/计划文档齐备（六轮子智能体调研沉淀）。
 - **2026-09-12：Phase 0 完成**（脚手架/联调地基，验收全过）。踩坑记录见 docs/05 Phase 0 实施记录（tsconfig paths 绕 exports、preload 强制 CJS、pnpm 构建脚本白名单、plugin-react 5.x）。
-- 实现进行中，当前 Phase = docs/05 Phase 1（host 装配 + local-server）。
+- **2026-09-12：Phase 1 完成**（host 装配 + local-server：四 store/路由/编辑页/状态通道全伺服，编辑器页面真机验收通过，11 壳层单测全绿）。
+- 实现进行中，当前 Phase = docs/05 Phase 2（overlay 窗口）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）。
 - DSH 契约基线：0.1.0-rc.7（嵌套 rc.8），官方 web 前端走同款 `/api` 通道，桥的规格按 docs/03 实现。
 
