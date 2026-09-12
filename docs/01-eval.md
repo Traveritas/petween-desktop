@@ -67,3 +67,4 @@ petween `package.json` **没有 runtime dependencies**（`@deepseek-ai/*` 全在
 - **npm 产物消费**：petween 的 exports 面向 DSH（host 插件入口 + `__ModuleLoader__` 工厂包），对桌面壳不可用；MVP 走 file: 依赖 + deep import `src/`，P1-P3 产物化补丁可推迟（见 02 号文档 §6）。
 - **headless DSH 做状态源**：headless 是一次性 CLI 问答，无常驻服务。
 - **MVP 阶段移植 petween-physics**：physics 核心 cordis-free 可平移，但视口语义要从「DSH 网页视口」改为「OS 屏幕/窗口边界」——放到完整版阶段。
+- **把 petween 的「DSH 部分」拆成独立仓库**（2026-09-12 拍板：不拆，维持 petween 单仓 + submodule 消费）。理由：逐块对账后真正形态特定的只有两个入口接线文件（`src/index.ts` 137 行 + `src/client/index.ts` 59 行）加几行 bundle 配置——体量不值得独立成仓；而名义上的「DSH 层」`src/integration/dsh/` 恰恰是**两形态共享**的（桌面桥的输出端就是 `event-normalizer`，`state-protocol`/`state-adapter`/`DshStateSource` 被桌面 overlay 直接复用），拆出去反而制造反向依赖。两形态 90% 共享演进，单仓 = 单 commit 同时生效；拆仓会打散 1044 用例的跨层测试矩阵、重定向 petween-physics 的 inject 目标。逻辑隔离由模块纪律 + 02 号文档 §6 的 exports 桶承担。重新评估的触发信号：出现第三宿主形态且 core 需求方向性分叉 / petween 内核上 npm 给第三方消费 / submodule 指针频繁因 DSH 契约剧变而僵死。
