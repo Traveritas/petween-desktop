@@ -61,7 +61,8 @@ pnpm test                                                                # 壳�
 - **2026-09-12：Phase 0 完成**（脚手架/联调地基，验收全过）。踩坑记录见 docs/05 Phase 0 实施记录（tsconfig paths 绕 exports、preload 强制 CJS、pnpm 构建脚本白名单、plugin-react 5.x）。
 - **2026-09-12：Phase 1 完成**（host 装配 + local-server：四 store/路由/编辑页/状态通道全伺服，编辑器页面真机验收通过，11 壳层单测全绿）。
 - **2026-09-12：Phase 2 完成**（overlay 透明置顶窗 + dev proxy + prod 同源伺服；真机验收：宠物可见/动画/位置持久化/重启保持）。
-- 实现进行中，当前 Phase = docs/05 Phase 3（点击穿透）。
+- **2026-09-12：Phase 3 完成**（点击穿透：renderer 信号 + 光标轮询双通道、6px 滞回、拖动保持、#15376/#33281 两个坑位处理；自动化验证过、人工 checklist 留给用户）。
+- 实现进行中，当前 Phase = docs/05 Phase 4（DSH 状态桥）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）。
 - DSH 契约基线：0.1.0-rc.7（嵌套 rc.8），官方 web 前端走同款 `/api` 通道，桥的规格按 docs/03 实现。
 

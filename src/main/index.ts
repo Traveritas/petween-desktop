@@ -11,6 +11,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import { DEV_LOCAL_PORT } from './dev-port'
 import { startPetweenLocalServer } from './local-server'
+import { attachPointerThrough } from './pointer-through'
 import { createOverlayWindow, loadOverlayPage } from './overlay-window'
 
 async function bootstrap(): Promise<void> {
@@ -38,6 +39,9 @@ async function bootstrap(): Promise<void> {
   })
 
   const overlay = createOverlayWindow()
+  // Click-through from the very first frame (docs/05 Phase 3).
+  const pointerThrough = attachPointerThrough(overlay)
+  overlay.once('closed', () => pointerThrough.dispose())
   loadOverlayPage(overlay, {
     devUrl: process.env.ELECTRON_RENDERER_URL,
     serverPort: server.port,

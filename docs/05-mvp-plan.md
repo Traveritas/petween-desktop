@@ -48,15 +48,21 @@
 - dev 下 settings 编辑器无需代理（不是 vite 页面，直接 loadURL local-server 即同源）；proxy 只需覆盖 vite 伺服的 overlay 页面用到的 `/api/petween` + `/petween-assets`。
 - 拖动验证以「API 写位置 → 视觉确认移动 → 重启保持」等价覆盖（拖动是 petween 客户端既有行为，上游 1044 用例已覆盖；合成拖动会打断用户前台应用，不做）。
 
-## Phase 3：点击穿透
+## Phase 3：点击穿透（✅ 2026-09-12 代码完成；人工 checklist 待用户复验）
 
-- [ ] `pointer-through.ts`：默认 `setIgnoreMouseEvents(true, {forward:true})` + renderer mousemove hit-test 切换（IPC 通道经 preload 白名单）
-- [ ] hit-test 数据源：优先复用 petween StageSnapshot 的 `bodyRect`（extension-surface 已暴露），否则 `document.elementsFromPoint`
-- [ ] **光标轮询兜底**（必须）：main `screen.getCursorScreenPoint()` 200~500ms 轮询 + 渲染层定期上报包围盒（04 号文档 §2 坑 1——焦点在别的 App 时转发停摆）
-- [ ] 4~8px 滞回余量防抖动；`did-finish-load` 后重新 apply 转发；DevTools 打开时告警提示
-- [ ] 拖动与穿透的交互语义实测：穿透态下鼠标扫过宠物应恢复可点；拖动中不穿透
+- [x] `pointer-through.ts` + `pointer-through-logic.ts`：默认 `setIgnoreMouseEvents(true,{forward:true})`，决策纯函数化（12 用例）；IPC 通道 `petween:pointer-signal` 经 preload 白名单（sandbox CJS preload）
+- [x] hit-test 数据源：优先 petween StageSnapshot 的 `bodyRect`（`petweenClientService.subscribeStage`，含 `dragging` 标志），DOM 兜底 `document.elementsFromPoint` + `.petween-position` closest
+- [x] **光标轮询兜底**（必须）：main `screen.getCursorScreenPoint()` 250ms 轮询 + renderer 上报 bodyRect（client→screen 经 `getContentBounds()` 映射）——渲染信号 800ms 视为陈旧（#33281 停摆场景纯靠轮询）
+- [x] 6px 滞回余量防抖动（进入用紧矩形、保持用扩展矩形）；`did-finish-load` 后强制重 apply（#15376）；DevTools 打开时 console 告警
+- [x] 拖动语义：snapshot `dragging` 标志 2s 内强制 interactive（拖动中绝不穿透），单测覆盖
+- [ ] **人工 checklist（待用户复验，必须关 DevTools）**：① 宠物矩形外点击落到下层窗口/桌面；② 悬停宠物 hover、单击触发交互；③ 别的应用全屏工作时宠物仍可点/可拖（#33281 场景）；④ 任务栏不被遮挡交互；⑤ 拖动流畅无抖动
 
-**验收（人工 checklist）**：① 宠物矩形外点击完全落到下层窗口/桌面；② 悬停宠物出现 hover、单击触发交互；③ 在别的应用全屏工作时宠物仍可点/可拖（#33281 场景）；④ 任务栏可见且不被宠物窗遮挡交互；⑤ 拖动流畅无抖动。**必须关掉 DevTools 测。**
+**验收（自动化部分 ✅ 2026-09-12 真机）**：启动即 click-through；did-finish-load 重 apply 生效；真实/合成光标进入宠物 bodyRect → 日志翻 `interactive`，离开 → 翻回 `click-through`（两次受控验证）。决策矩阵 12 用例（fresh/stale 信号、轮询兜底、坐标映射、滞回进出、拖动保持）全绿。
+
+**实施记录**：
+- 状态翻转打了一行 log（`pointer-through: interactive/click-through`）——排查穿透问题的首要诊断线，保留。
+- renderer 信号节流 50ms + snapshot 推送/pointerdown/pointerup 强制直发 + 1s keep-alive。
+- preload 在 sandbox 下必须 CJS（Phase 0 已固），IPC payload 在 main 侧做形状校验（不可信输入）。
 
 ## Phase 4：DSH 状态桥
 

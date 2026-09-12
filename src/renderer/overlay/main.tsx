@@ -9,8 +9,13 @@
  */
 import { createRoot } from 'react-dom/client'
 import { PetOverlay } from 'petween/client/overlay/PetOverlay'
+import { startPointerSignal } from './pointer-signal'
 
 const container = document.getElementById('root')
 if (container === null) throw new Error('petween-desktop: #root container missing')
 
 createRoot(container).render(<PetOverlay />)
+
+// Click-through signaling runs outside React: it must survive overlays
+// remounting and never depend on component lifecycles.
+startPointerSignal()

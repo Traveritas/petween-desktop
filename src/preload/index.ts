@@ -1,7 +1,14 @@
 /**
- * Phase 0 placeholder bridge. The pointer-through toggle and window-control
- * channels (whitelisted via contextBridge) arrive in Phase 3.
+ * The contextBridge surface (whitelist). The overlay renderer reports
+ * pointer-through signals; every channel here is explicit — nothing else
+ * crosses the isolation boundary.
  */
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
-contextBridge.exposeInMainWorld('petweenDesktop', { phase: 0 })
+contextBridge.exposeInMainWorld('petweenDesktop', {
+  pointerThrough: {
+    report: (signal: unknown): void => {
+      ipcRenderer.send('petween:pointer-signal', signal)
+    },
+  },
+})
