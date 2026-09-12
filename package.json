@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:petween": "pnpm --dir vendor/petween run build",
+    "dist:win": "pnpm build:petween && electron-vite build && electron-builder --win",
     "typecheck": "tsc --pretty false",
     "test": "vitest run"
   },

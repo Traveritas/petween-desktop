@@ -64,7 +64,8 @@ pnpm test                                                                # 壳�
 - **2026-09-12：Phase 3 完成**（点击穿透：renderer 信号 + 光标轮询双通道、6px 滞回、拖动保持、#15376/#33281 两个坑位处理；自动化验证过、人工 checklist 留给用户）。
 - **2026-09-12：Phase 4 完成**（DSH 状态桥：双流 WS + 9 条转换 + 退避/心跳/重连差集 FSM；假 DSH 端到端验证 SSE 全事件序列 + 真实重连；真 DSH 联测待用户复验）。
 - **2026-09-12：Phase 5 完成**（系统集成：单实例锁/托盘/自启/close→hide/DSH 导入；二次启动唤起设置窗与托盘真机验证过）。
-- 实现进行中，当前 Phase = docs/05 Phase 6（构建分发）。
+- **2026-09-12：Phase 6 打包链落地**（electron-builder NSIS+便携版；`pnpm dist:win` 一键链；便携版真机冒烟全过：随机端口/asar 伺服/穿透/DSH 退避/托盘/干净退出）。**MVP（Phase 0~6）代码侧完成**；待用户复验/拍板项见 docs/05 各 Phase 验收注记与「待用户拍板项」。
+- 后续增强入口 = docs/05「后续增强」清单（petween P0-P2 回流、跟随会话、physics 移植、多显示器、Playwright 冒烟等）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）。
 - DSH 契约基线：0.1.0-rc.7（嵌套 rc.8），官方 web 前端走同款 `/api` 通道，桥的规格按 docs/03 实现。
 

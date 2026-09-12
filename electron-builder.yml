@@ -1,0 +1,30 @@
+# electron-builder 配置（docs/04 §5）。
+# appId / publish 目标为 docs/05「待用户拍板项」——发布前确认；
+# electron-updater 与 GitHub Releases 在拍板后一并引入。
+appId: com.traveritas.petween
+productName: Petween
+directories:
+  output: dist
+files:
+  - out/**/*
+  - vendor/petween/lib/editor.js
+  # petween 的 TS 源码已打进 out/main（externalizeDepsPlugin exclude）；
+  # link: 依赖不能被 builder 跟进整个 submodule。运行时需要的只有上面的 editor.js。
+  - '!node_modules/petween'
+  # react/react-dom 只在构建期被 bundle 进 renderer，运行时无人 require
+  - '!node_modules/react'
+  - '!node_modules/react-dom'
+asar: true
+compression: maximum
+extraResources:
+  - from: resources/tray.png
+    to: tray.png
+win:
+  target:
+    - nsis
+    - dir # 便携产物：本地打包验证用（dist/win-unpacked/Petween.exe）
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false

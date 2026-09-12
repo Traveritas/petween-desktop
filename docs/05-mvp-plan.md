@@ -95,15 +95,20 @@
 - 托盘模板纯函数化（`tray-menu.ts`，action id → handler 映射在 tray.ts），状态组合 2 用例；legacy-import 3 用例（copy/skip 边界 + canImport 判定）。
 - 设置窗两种模式都直接 loadURL local-server（不是 vite 页面，天然同源，无需代理）。
 
-## Phase 6：构建分发
+## Phase 6：构建分发（✅ 2026-09-12 打包链落地并真机验证便携版；发布项待拍板）
 
-- [ ] electron-builder + NSIS（04 号文档 §5 配置）+ asar + files 白名单
-- [ ] `vendor/petween/lib/editor.js` 进包（构建脚本里先构建 submodule 或 vendor 产物提交策略——二选一，写明）
-- [ ] GitHub Releases + electron-updater（更新前 flush 在途保存）
-- [ ] README：安装说明 + **SmartScreen「更多信息→仍要运行」说明**
-- [ ] Playwright `_electron.launch` 冒烟：窗口数、托盘存在、设置页可开
+- [x] electron-builder + NSIS（`electron-builder.yml`，docs/04 §5 配置）+ asar + files 白名单：`out/**` + `vendor/petween/lib/editor.js`（构建链先构建 submodule——`dist:win` 脚本一键串联）；排除 `node_modules/petween`（源码已打进 out/main，link: 依赖不能跟进整个 submodule）与 react/react-dom（仅构建期依赖）；`tray.png` 走 extraResources；同时产出 `dir` 便携版用于本地验证
+- [x] `vendor/petween/lib/editor.js` 进包：**构建脚本先构建 submodule** 策略（产物不入库），`pnpm dist:win` = petween build → electron-vite build → electron-builder
+- [ ] GitHub Releases + electron-updater（**待用户拍板 appId/发布仓库后启用**；更新前 flush 在途保存的注意项已在 docs/04 §5 记录）
+- [x] README：安装说明 + **SmartScreen「更多信息→仍要运行」说明**（含 DSH 端口/环境变量说明、开发命令）
+- [ ] Playwright `_electron.launch` 冒烟（**暂缓**：便携版真机冒烟已覆盖等价面——见下；补自动化冒烟记为后续增强）
 
-**验收**：干净 Windows 机器（或新用户目录）安装→首跑→全功能可用；卸载无残留启动项。
+**验收（✅ 2026-09-12 便携版真机）**：`dist/win-unpacked/Petween.exe` 直跑：随机端口 local-server 起服务（51401）、数据目录正确、穿透初始化（click-through×2 = init + did-finish-load 重 apply）、DSH 退避循环、**宠物从 asar 伺服的 overlay 页面正常渲染**（透明置顶窗 + 配置/资产 API + petween-assets 全链走打包产物）、托盘图标在位、无错误弹窗、进程退出干净。NSIS 安装器已产出（`dist/Petween Setup 0.1.0.exe`，~106MB）。**待用户复验**：干净机器/新用户目录安装→首跑全流程；卸载无残留启动项。已知小项：本机代理环境下 curl 直连 51401 挂起（Electron 窗内自取不受影响，发布前在新机器复测）。
+
+**实施记录**：
+- 打包产物体积：asar ~2MB + Electron 运行时 → 安装器 ~106MB（符合 docs/01 预估的 50-100MB 地板价上沿）。
+- `main` 字段 = `out/main/index.js`（package.json 早已配置）；便携版日志直接走 stdout，排查方便。
+- packaged userData 沿用 `petween-desktop`（package.json name），与 dev 一致——首装即空数据目录属预期（用户导入图片后才见宠物）。
 
 ## 后续增强（MVP 后，按价值排序）
 
