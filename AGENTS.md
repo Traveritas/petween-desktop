@@ -43,20 +43,23 @@ petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 +
 9. **main 薄壳化**：Electron API 调用收敛到少数模块，业务逻辑纯函数化，vitest node 环境 + `vi.mock('electron')` 直测；渲染栈沿用 petween 既有 jsdom + mocked `element.animate` 模式。单元测试绝不启动 Electron。
 10. 已知前置坑：`vendor/petween` 的 node_modules 符号链接因历史目录搬迁**已断**，联调前必须先在 submodule 内 `pnpm install`；编辑器页面依赖 submodule 内 `pnpm run build` 产出的 `lib/editor.js`。
 
-## 5. 构建与运行（Phase 0 落地后更新本节）
+## 5. 构建与运行
 
 ```bash
 git submodule update --init --recursive
 cd vendor/petween && pnpm install && pnpm run build && pnpm vitest run   # 修复断链 + 基线验证
 cd ../.. && pnpm install && pnpm dev                                     # electron-vite 三段式
+pnpm typecheck                                                           # tsc 含 petween 源码
+pnpm test                                                                # 壳层单测（vitest node 环境）
 ```
 
-（脚手架尚未创建——见 docs/05 Phase 0。）
+注意：pnpm 10 拦截依赖构建脚本，`pnpm.onlyBuiltDependencies`（electron/esbuild）已写入 package.json；Electron 二进制缺失时跑 `node node_modules/electron/install.js`。
 
 ## 6. 当前状态
 
 - 2026-09-12：仓库建立，petween submodule 锁定 b0763e1，评估/规格/计划文档齐备（六轮子智能体调研沉淀）。
-- **实现尚未开始**，执行入口 = `docs/05-mvp-plan.md` Phase 0。
+- **2026-09-12：Phase 0 完成**（脚手架/联调地基，验收全过）。踩坑记录见 docs/05 Phase 0 实施记录（tsconfig paths 绕 exports、preload 强制 CJS、pnpm 构建脚本白名单、plugin-react 5.x）。
+- 实现进行中，当前 Phase = docs/05 Phase 1（host 装配 + local-server）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）。
 - DSH 契约基线：0.1.0-rc.7（嵌套 rc.8），官方 web 前端走同款 `/api` 通道，桥的规格按 docs/03 实现。
 

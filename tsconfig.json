@@ -1,0 +1,25 @@
+{
+  // Single combined program for main / preload / renderer, mirroring petween's
+  // own tsconfig so its TS sources deep-imported from vendor/petween/src
+  // compile under identical assumptions. Do not add strictness options petween
+  // itself does not use (docs/02 §5).
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "petween/*": ["./vendor/petween/src/*"]
+    }
+  },
+  "include": ["src", "electron.vite.config.ts", "vitest.config.ts"]
+}
