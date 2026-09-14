@@ -23,6 +23,22 @@ interface PointerSignal {
 
 const THROTTLE_MS = 50
 const KEEP_ALIVE_MS = 1000
+/**
+ * A hover verdict is only trustworthy while a real mousemove backs it. The
+ * keep-alive must never re-assert a stale hoverHit=true: if event delivery
+ * stalls while the cursor is on the pet (#33281 focus stall, sleep, fast
+ * switches), the frozen verdict plus the keep-alive refresh would flap the
+ * whole overlay between interactive and click-through forever — and each
+ * interactive phase eats every click on screen. Keep below the main side's
+ * SIGNAL_FRESH_MS (800) so a fresh-at-send verdict is still fresh at decide
+ * time.
+ */
+const MOVE_FRESH_MS = 600
+
+/** Exposed for tests: a hover verdict older than MOVE_FRESH_MS degrades to false. */
+export function effectiveHoverHit(hoverHit: boolean, moveAgeMs: number): boolean {
+  return moveAgeMs < MOVE_FRESH_MS && hoverHit
+}
 
 export function startPointerSignal(): () => void {
   const current: PointerSignal = {
@@ -31,6 +47,7 @@ export function startPointerSignal(): () => void {
     hoverHit: false,
     cursorClient: null,
   }
+  let lastMouseMoveAt = Number.NEGATIVE_INFINITY
   let lastSent = 0
 
   const report = window.petweenDesktop.pointerThrough.report
@@ -38,7 +55,8 @@ export function startPointerSignal(): () => void {
     const now = performance.now()
     if (!force && now - lastSent < THROTTLE_MS) return
     lastSent = now
-    report({ ...current, cursorClient: current.cursorClient === null ? null : { ...current.cursorClient } })
+    const hoverHit = effectiveHoverHit(current.hoverHit, now - lastMouseMoveAt)
+    report({ ...current, hoverHit, cursorClient: current.cursorClient === null ? null : { ...current.cursorClient } })
   }
 
   const hitTest = (x: number, y: number): boolean =>
@@ -47,11 +65,13 @@ export function startPointerSignal(): () => void {
       .some((element) => element instanceof Element && element.closest('.petween-position') !== null)
 
   const onMouseMove = (event: MouseEvent): void => {
+    lastMouseMoveAt = performance.now()
     current.cursorClient = { x: event.clientX, y: event.clientY }
     current.hoverHit = hitTest(event.clientX, event.clientY)
     send()
   }
   const onPointerDown = (event: PointerEvent): void => {
+    lastMouseMoveAt = performance.now()
     current.cursorClient = { x: event.clientX, y: event.clientY }
     current.hoverHit = hitTest(event.clientX, event.clientY)
     send(true)
