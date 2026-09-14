@@ -51,6 +51,7 @@ export default defineConfig({
     server: {
       proxy: {
         '/api/petween': { target: localServerTarget },
+        '/api/petween-desktop': { target: localServerTarget },
         '/petween-assets': { target: localServerTarget },
       },
     },
@@ -58,6 +59,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           overlay: resolve(rendererRoot, 'overlay/index.html'),
+          settings: resolve(rendererRoot, 'settings/index.html'),
         },
       },
     },

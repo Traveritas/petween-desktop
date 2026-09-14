@@ -63,13 +63,18 @@ export function registerOverlayStatic(
   host: { webServer: { register(route: WebRoute): () => void } },
   rendererDistDir: string,
 ): () => void {
-  const page = (req: IncomingMessage, res: ServerResponse): void => {
-    void serveFile(res, rendererDistDir, join('overlay', 'index.html'))
+  const page = (relative: string) => (req: IncomingMessage, res: ServerResponse): void => {
+    void serveFile(res, rendererDistDir, relative)
   }
+  const overlayPage = page(join('overlay', 'index.html'))
+  const settingsPage = page(join('settings', 'index.html'))
   const disposers = [
-    host.webServer.register({ kind: 'exact', path: '/overlay.html', handler: page }),
-    host.webServer.register({ kind: 'exact', path: '/overlay', handler: page }),
-    host.webServer.register({ kind: 'exact', path: '/overlay/index.html', handler: page }),
+    host.webServer.register({ kind: 'exact', path: '/overlay.html', handler: overlayPage }),
+    host.webServer.register({ kind: 'exact', path: '/overlay', handler: overlayPage }),
+    host.webServer.register({ kind: 'exact', path: '/overlay/index.html', handler: overlayPage }),
+    host.webServer.register({ kind: 'exact', path: '/settings.html', handler: settingsPage }),
+    host.webServer.register({ kind: 'exact', path: '/settings', handler: settingsPage }),
+    host.webServer.register({ kind: 'exact', path: '/settings/index.html', handler: settingsPage }),
     host.webServer.register({
       kind: 'prefix',
       path: '/assets',

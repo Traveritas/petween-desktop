@@ -6,7 +6,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   DRAG_HOLD_MS,
-  HYSTERESIS_PX,
   SIGNAL_FRESH_MS,
   decideInteractive,
   type PointerThroughState,
@@ -25,6 +24,9 @@ function inputs(overrides: Partial<Parameters<typeof decideInteractive>[0]> = {}
     ...overrides,
   }
 }
+
+/** The default margin (DEFAULT_POINTER_OPTIONS.hitPaddingPx). */
+const DEFAULT_MARGIN_PX = 6
 
 describe('defaults', () => {
   it('no signal and no rect → click-through', () => {
@@ -121,7 +123,7 @@ describe('hysteresis', () => {
       inputs({
         signal: { hoverHit: false, dragging: false, bodyRect: RECT },
         signalAt: null,
-        cursorScreen: { x: RECT.x + RECT.width + HYSTERESIS_PX - 1, y: 448 },
+        cursorScreen: { x: RECT.x + RECT.width + DEFAULT_MARGIN_PX - 1, y: 448 },
       }),
       entered,
     )
@@ -134,7 +136,7 @@ describe('hysteresis', () => {
       inputs({
         signal: { hoverHit: false, dragging: false, bodyRect: RECT },
         signalAt: null,
-        cursorScreen: { x: RECT.x + RECT.width + HYSTERESIS_PX + 2, y: 448 },
+        cursorScreen: { x: RECT.x + RECT.width + DEFAULT_MARGIN_PX + 2, y: 448 },
       }),
       entered,
     )
@@ -146,11 +148,61 @@ describe('hysteresis', () => {
       inputs({
         signal: { hoverHit: false, dragging: false, bodyRect: RECT },
         signalAt: null,
-        cursorScreen: { x: RECT.x + RECT.width + HYSTERESIS_PX - 1, y: 448 },
+        cursorScreen: { x: RECT.x + RECT.width + DEFAULT_MARGIN_PX - 1, y: 448 },
       }),
       THROUGH,
     )
     expect(nearMiss.interactive).toBe(false)
+  })
+})
+
+describe('forced modes (stuck-state escapes)', () => {
+  it('always-through ignores hover, drag and cursor-in-rect', () => {
+    const forced = { mode: 'always-through' as const, hitPaddingPx: 6 }
+    const state = decideInteractive(
+      inputs({
+        signal: { hoverHit: true, dragging: true, bodyRect: RECT },
+        signalAt: 1_000_000,
+        cursorScreen: { x: 648, y: 448 },
+      }),
+      THROUGH,
+      forced,
+    )
+    expect(state.interactive).toBe(false)
+    expect(state.bodyRect).toEqual(RECT) // still tracked for an instant return to auto
+  })
+
+  it('always-interactive ignores everything the other way', () => {
+    const state = decideInteractive(
+      inputs({ cursorScreen: null, signal: null, signalAt: null }),
+      THROUGH,
+      { mode: 'always-interactive', hitPaddingPx: 6 },
+    )
+    expect(state.interactive).toBe(true)
+  })
+})
+
+describe('hit padding option', () => {
+  it('wider padding holds interactivity further out', () => {
+    const entered = decideInteractive(
+      inputs({
+        signal: { hoverHit: false, dragging: false, bodyRect: RECT },
+        signalAt: null,
+        cursorScreen: { x: 648, y: 448 },
+      }),
+      THROUGH,
+    )
+    expect(entered.interactive).toBe(true)
+
+    const cursorPastTightEdge = inputs({
+      signal: { hoverHit: false, dragging: false, bodyRect: RECT },
+      signalAt: null,
+      cursorScreen: { x: RECT.x + RECT.width + 15, y: 448 },
+    })
+    // default 6px margin: dropped
+    expect(decideInteractive(cursorPastTightEdge, entered).interactive).toBe(false)
+    // 20px margin: still held
+    expect(decideInteractive(cursorPastTightEdge, entered, { mode: 'auto', hitPaddingPx: 20 }).interactive).toBe(true)
   })
 })
 

@@ -30,6 +30,8 @@ export function createOverlayWindow(): BrowserWindow {
   })
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setBounds(primary.bounds)
+  // showInactive: focusable:false windows could still steal focus via
+  // show() on Windows (electron#11049).
 
   const refit = (display: Electron.Display): void => {
     if (display.id === primary.id) win.setBounds(display.bounds)
@@ -52,5 +54,5 @@ export function loadOverlayPage(win: BrowserWindow, options: { devUrl?: string; 
   } else {
     throw new Error('overlay window needs either a dev URL or the local-server port')
   }
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => win.showInactive())
 }

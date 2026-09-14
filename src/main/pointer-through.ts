@@ -1,13 +1,21 @@
 /**
  * pointer-through.ts — the Electron glue around the pure decision logic
  * (docs/04 §2). Owns the IPC channel, the 250ms cursor poll, applying
- * setIgnoreMouseEvents on state change, and the known-pitfall re-applies:
- * forward:true dies after a page reload (#15376) and DevTools breaks
- * transparency entirely (warn, never silently mis-test).
+ * setIgnoreMouseEvents on state change, and the hardening surface:
+ *
+ *  - settings-driven options (mode / hit padding / mouse forwarding), live
+ *    applied without restarting;
+ *  - an interactive lock (rescue hotkey / settings button) that overrides
+ *    everything — the escape hatch for the known wedge bugs;
+ *  - self-healing (docs: electron PR #52631/#52633 pending): re-issue the
+ *    native ignore state periodically and after render-process-gone,
+ *    power-resume, display changes and drag ends, because the native
+ *    message-hook can silently go stale.
  */
-import { ipcMain, screen, type BrowserWindow, type IpcMainEvent } from 'electron'
+import { ipcMain, powerMonitor, screen, type BrowserWindow, type IpcMainEvent } from 'electron'
 import {
   decideInteractive,
+  type PointerThroughOptions,
   type PointerThroughState,
   type Rect,
   type RendererSignal,
@@ -16,13 +24,7 @@ import {
 export const POINTER_SIGNAL_CHANNEL = 'petween:pointer-signal'
 
 const POLL_MS = 250
-
-interface WireSignal {
-  bodyRect: Rect | null
-  dragging: boolean
-  hoverHit: boolean
-  cursorClient: { x: number; y: number } | null
-}
+const SELF_HEAL_INTERVAL_MS = 5_000
 
 function isRect(value: unknown): value is Rect {
   if (typeof value !== 'object' || value === null) return false
@@ -44,18 +46,39 @@ function sanitizeSignal(payload: unknown): RendererSignal | null {
   return { hoverHit: raw.hoverHit, dragging: raw.dragging, bodyRect: isRect(bodyRect) ? bodyRect : null }
 }
 
-export function attachPointerThrough(win: BrowserWindow): { dispose(): void } {
+export interface PointerThroughHandle {
+  /** Live-apply new settings (forces a re-issue so flag changes take effect). */
+  updateOptions(next: PointerThroughRuntimeOptions): void
+  /** Escape hatch: overrides every mode while on. */
+  setInteractiveLock(locked: boolean): void
+  toggleInteractiveLock(): boolean
+  /** Force a re-issue of the native ignore state right now. */
+  fixNow(): void
+  dispose(): void
+}
+
+/** The logic options plus the glue-only toggles. */
+export interface PointerThroughRuntimeOptions extends PointerThroughOptions {
+  selfHealing: boolean
+  forwardMouseMoves: boolean
+}
+
+export function attachPointerThrough(win: BrowserWindow, initial: PointerThroughRuntimeOptions): PointerThroughHandle {
+  let options = initial
   let state: PointerThroughState = { interactive: false, bodyRect: null }
   let applied: boolean | null = null
   let signal: RendererSignal | null = null
   let signalAt: number | null = null
+  let prevDragging = false
+  let interactiveLock = false
 
   const apply = (): void => {
-    if (applied === state.interactive) return
-    applied = state.interactive
-    console.log(`[petween-desktop] pointer-through: ${state.interactive ? 'interactive' : 'click-through'}`)
-    if (state.interactive) win.setIgnoreMouseEvents(false)
-    else win.setIgnoreMouseEvents(true, { forward: true })
+    const target = interactiveLock || state.interactive
+    if (applied === target) return
+    applied = target
+    console.log(`[petween-desktop] pointer-through: ${target ? 'interactive' : 'click-through'}`)
+    if (target) win.setIgnoreMouseEvents(false)
+    else win.setIgnoreMouseEvents(true, { forward: options.forwardMouseMoves })
   }
 
   const evaluate = (): void => {
@@ -70,14 +93,24 @@ export function attachPointerThrough(win: BrowserWindow): { dispose(): void } {
         contentOrigin: { x: bounds.x, y: bounds.y },
       },
       state,
+      options,
     )
     apply()
+  }
+
+  const reissue = (): void => {
+    // Stale native hooks are the root of the wedge bugs: force the next
+    // apply to actually call setIgnoreMouseEvents again.
+    applied = null
+    evaluate()
   }
 
   const onSignal = (event: IpcMainEvent, payload: unknown): void => {
     if (event.sender !== win.webContents) return
     const sanitized = sanitizeSignal(payload)
     if (sanitized === null) return
+    if (prevDragging && !sanitized.dragging) reissue() // drag end: re-anchor the hit region (#41501 family)
+    prevDragging = sanitized.dragging
     signal = sanitized
     signalAt = Date.now()
     evaluate()
@@ -85,11 +118,21 @@ export function attachPointerThrough(win: BrowserWindow): { dispose(): void } {
   ipcMain.on(POINTER_SIGNAL_CHANNEL, onSignal)
 
   const onFinishedLoad = (): void => {
-    // Forwarding silently dies across reloads (#15376): force the next apply.
     applied = null
     evaluate()
   }
   win.webContents.on('did-finish-load', onFinishedLoad)
+
+  const onRenderGone = (): void => reissue()
+  win.webContents.on('render-process-gone', onRenderGone)
+
+  const onPowerResume = (): void => reissue()
+  powerMonitor.on('resume', onPowerResume)
+
+  const onDisplayMetrics = (): void => reissue()
+  screen.on('display-metrics-changed', onDisplayMetrics)
+  screen.on('display-added', onDisplayMetrics)
+  screen.on('display-removed', onDisplayMetrics)
 
   const onDevToolsOpened = (): void => {
     console.warn(
@@ -99,16 +142,47 @@ export function attachPointerThrough(win: BrowserWindow): { dispose(): void } {
   win.webContents.on('devtools-opened', onDevToolsOpened)
 
   const timer = setInterval(evaluate, POLL_MS)
+  let selfHealTimer: ReturnType<typeof setInterval> | null =
+    initial.selfHealing ? setInterval(reissue, SELF_HEAL_INTERVAL_MS) : null
+  const syncSelfHeal = (enabled: boolean): void => {
+    if (enabled && selfHealTimer === null) selfHealTimer = setInterval(reissue, SELF_HEAL_INTERVAL_MS)
+    if (!enabled && selfHealTimer !== null) {
+      clearInterval(selfHealTimer)
+      selfHealTimer = null
+    }
+  }
   evaluate() // start click-through with forwarding immediately
 
+  const setInteractiveLock = (locked: boolean): void => {
+    if (interactiveLock === locked) return
+    interactiveLock = locked
+    console.log(`[petween-desktop] pointer-through: rescue lock ${locked ? 'ON (interactive)' : 'off'}`)
+    reissue()
+  }
+
   return {
+    updateOptions(next) {
+      options = next
+      syncSelfHeal(next.selfHealing)
+      reissue()
+    },
+    setInteractiveLock,
+    toggleInteractiveLock() {
+      setInteractiveLock(!interactiveLock)
+      return interactiveLock
+    },
+    fixNow: reissue,
     dispose(): void {
       clearInterval(timer)
+      if (selfHealTimer !== null) clearInterval(selfHealTimer)
       ipcMain.removeListener(POINTER_SIGNAL_CHANNEL, onSignal)
       win.webContents.removeListener('did-finish-load', onFinishedLoad)
+      win.webContents.removeListener('render-process-gone', onRenderGone)
       win.webContents.removeListener('devtools-opened', onDevToolsOpened)
+      powerMonitor.removeListener('resume', onPowerResume)
+      screen.removeListener('display-metrics-changed', onDisplayMetrics)
+      screen.removeListener('display-added', onDisplayMetrics)
+      screen.removeListener('display-removed', onDisplayMetrics)
     },
   }
 }
-
-export type { WireSignal }

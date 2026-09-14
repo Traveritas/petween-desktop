@@ -3,29 +3,42 @@
  * port orchestration, window creation. All business logic lives in
  * Electron-free modules (local-server, dsh-bridge, pointer-through, ...).
  *
- * Phase 5: single-instance lock (second launch re-opens settings), tray
- * (status / settings / auto-launch / import / quit), settings window with
- * close→hide, and a tray-owned quit — window-all-closed never quits.
+ * Phase 5+: single-instance lock, tray, close→hide, tray-owned quit.
+ * Settings phase (2026-09-14): the desktop settings store drives the DSH
+ * bridge and the click-through engine live; the settings window is the
+ * shell-owned page (连接 / 宠物[iframe] / 交互 / 通用).
  */
-import { app, dialog } from 'electron'
+import { app, dialog, globalShortcut } from 'electron'
 import { join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { DEV_LOCAL_PORT } from './dev-port'
+import { registerDesktopRoutes, type DesktopStatus } from './desktop-routes'
+import {
+  createDesktopSettingsStore,
+  type DesktopSettings,
+  type DesktopSettingsStore,
+} from './desktop-settings'
 import { createDshBridge } from './dsh-bridge/bridge'
 import { describeDsh } from './dsh-bridge/dsh-client'
 import { connectDshSocket } from './dsh-bridge/ws-socket'
 import { getAutoLaunch, setAutoLaunch } from './login-item'
 import { importLegacyData, legacyHomeHasData, targetHomeCanImport } from './legacy-import'
 import { startPetweenLocalServer, type PetweenLocalServer } from './local-server'
-import { attachPointerThrough } from './pointer-through'
+import { attachPointerThrough, type PointerThroughHandle, type PointerThroughRuntimeOptions } from './pointer-through'
 import { createOverlayWindow, loadOverlayPage } from './overlay-window'
 import { openSettingsWindow } from './settings-window'
 import { createPetweenTray } from './tray'
 import type { TrayMenuState } from './tray-menu'
 
+const RESCUE_HOTKEY = 'Control+Alt+P'
+
 let isQuitting = false
 let server: PetweenLocalServer | null = null
+let settingsStore: DesktopSettingsStore | null = null
+let pointerThrough: PointerThroughHandle | null = null
 let openSettings: (() => void) | null = null
+let dshStatus: { connected: boolean; detail?: string } = { connected: false }
+let bridgeRestart: ((settings: DesktopSettings) => void) | null = null
 
 app.on('before-quit', () => {
   isQuitting = true
@@ -48,6 +61,34 @@ if (!singleLock) {
   app.on('window-all-closed', () => {})
 }
 
+function pointerOptions(settings: DesktopSettings): PointerThroughRuntimeOptions {
+  return {
+    mode: settings.clickThrough.mode,
+    hitPaddingPx: settings.clickThrough.hitPaddingPx,
+    forwardMouseMoves: settings.clickThrough.forwardMouseMoves,
+    selfHealing: settings.clickThrough.selfHealing,
+  }
+}
+
+function dshPortOf(settings: DesktopSettings): number {
+  return process.env.PETWEEN_DSH_PORT
+    ? Number.parseInt(process.env.PETWEEN_DSH_PORT, 10)
+    : settings.dsh.port
+}
+
+function syncRescueHotkey(settings: DesktopSettings): void {
+  const want = settings.clickThrough.rescueHotkeyEnabled
+  if (want) {
+    const registered = globalShortcut.register(RESCUE_HOTKEY, () => {
+      const locked = pointerThrough?.toggleInteractiveLock()
+      console.log(`[petween-desktop] rescue hotkey: lock ${locked ? 'ON' : 'off'}`)
+    })
+    if (!registered) console.warn(`[petween-desktop] rescue hotkey ${RESCUE_HOTKEY} registration failed (occupied?)`)
+  } else {
+    globalShortcut.unregister(RESCUE_HOTKEY)
+  }
+}
+
 async function bootstrap(): Promise<void> {
   const isDev = !app.isPackaged
   const dataRoot = join(app.getPath('userData'), 'petween-home')
@@ -59,27 +100,32 @@ async function bootstrap(): Promise<void> {
       ? DEV_LOCAL_PORT
       : 0
 
+  settingsStore = await createDesktopSettingsStore(join(app.getPath('userData'), 'desktop-settings.json'))
+  const settings = settingsStore.get()
+
   server = await startPetweenLocalServer({
     dataRoot,
     editorBundlePath,
-    // Prod serves the built overlay page from the local-server (same origin).
+    // Prod serves the built overlay/settings pages from the local-server (same origin).
     rendererDistDir: isDev ? undefined : join(__dirname, '../renderer'),
     port,
   })
   console.log(`[petween-desktop] local-server on http://127.0.0.1:${server.port} (data: ${dataRoot})`)
 
   const legacyRoot = dshHomePath('petween')
-  let dshConnected = false
 
   const openSettingsWindowNow = (): void => {
     if (server !== null) {
-      openSettingsWindow(server.port, { shouldHideOnClose: () => !isQuitting })
+      openSettingsWindow(
+        { serverPort: server.port, devUrl: process.env.ELECTRON_RENDERER_URL },
+        { shouldHideOnClose: () => !isQuitting },
+      )
     }
   }
   openSettings = openSettingsWindowNow
 
   const trayState = (): TrayMenuState => ({
-    dshConnected,
+    dshConnected: dshStatus.connected,
     autoLaunchEnabled: getAutoLaunch(),
     canToggleAutoLaunch: app.isPackaged,
     canImportFromDsh: legacyHomeHasData(legacyRoot) && targetHomeCanImport(dataRoot),
@@ -104,37 +150,79 @@ async function bootstrap(): Promise<void> {
     },
   })
 
-  // DSH state bridge (docs/05 Phase 4): aggregate mode — no CurrentSessionSource,
-  // petween's §14.5 fallback subscribes the overlay to every session's stream.
-  const bridge = createDshBridge({
-    relay: server.relay,
-    getPort: () =>
-      process.env.PETWEEN_DSH_PORT ? Number.parseInt(process.env.PETWEEN_DSH_PORT, 10) : 3080,
-    connect: connectDshSocket,
-    describe: describeDsh,
-    log: (message) => console.log(message),
-    onStatus: (status, detail) => {
-      console.log(`[petween-dsh] ${status}${detail === undefined ? '' : ` (${detail})`}`)
-      dshConnected = status === 'connected'
-      tray.update(trayState())
-    },
+  // Shell settings API (the settings page's only transport).
+  registerDesktopRoutes({ webServer: server.webServer }, {
+    settings: settingsStore,
+    status: (): DesktopStatus => ({
+      dsh: { enabled: settingsStore?.get().dsh.enabled ?? true, ...dshStatus },
+      appVersion: app.getVersion(),
+      dataRoot,
+      serverOrigin: `http://127.0.0.1:${server?.port ?? 0}`,
+    }),
+    fixInteraction: () => pointerThrough?.fixNow(),
+    getAutoLaunch,
+    setAutoLaunch,
+    probeDsh: describeDsh,
   })
-  bridge.start()
+
+  // DSH bridge lifecycle driven by the settings store (docs/05 Phase 4).
+  let bridge: ReturnType<typeof createDshBridge> | null = null
+  const startBridge = (): void => {
+    if (bridge !== null || server === null) return
+    bridge = createDshBridge({
+      relay: server.relay,
+      getPort: () => dshPortOf(settingsStore!.get()),
+      connect: connectDshSocket,
+      describe: describeDsh,
+      log: (message) => console.log(message),
+      onStatus: (status, detail) => {
+        console.log(`[petween-dsh] ${status}${detail === undefined ? '' : ` (${detail})`}`)
+        dshStatus = { connected: status === 'connected', detail }
+        tray.update(trayState())
+      },
+    })
+    bridge.start()
+  }
+  const stopBridge = (): void => {
+    bridge?.close()
+    bridge = null
+    dshStatus = { connected: false, detail: 'disabled' }
+    tray.update(trayState())
+  }
+  bridgeRestart = (next: DesktopSettings): void => {
+    const shouldRun = next.dsh.enabled
+    if (shouldRun && bridge === null) startBridge()
+    else if (!shouldRun && bridge !== null) stopBridge()
+    // Port changes are picked up by getPort() on the next reconnect cycle.
+  }
+  if (settings.dsh.enabled) startBridge()
   tray.update(trayState())
 
-  app.on('quit', () => {
-    bridge.close()
-    tray.destroy()
-    void server?.close()
+  // Live-apply settings: click-through options + rescue hotkey + bridge.
+  settingsStore.onChange((next) => {
+    pointerThrough?.updateOptions(pointerOptions(next))
+    syncRescueHotkey(next)
+    bridgeRestart?.(next)
   })
 
   const overlay = createOverlayWindow()
-  // Click-through from the very first frame (docs/05 Phase 3).
-  const pointerThrough = attachPointerThrough(overlay)
-  overlay.once('closed', () => pointerThrough.dispose())
+  pointerThrough = attachPointerThrough(overlay, pointerOptions(settings))
+  overlay.once('closed', () => {
+    pointerThrough?.dispose()
+    pointerThrough = null
+  })
+  syncRescueHotkey(settings)
   loadOverlayPage(overlay, {
     devUrl: process.env.ELECTRON_RENDERER_URL,
     serverPort: server.port,
+  })
+
+  app.on('quit', () => {
+    globalShortcut.unregister(RESCUE_HOTKEY)
+    bridge?.close()
+    tray.destroy()
+    void server?.close()
+    void settingsStore?.flush()
   })
 }
 

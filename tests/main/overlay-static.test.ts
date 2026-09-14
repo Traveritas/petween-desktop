@@ -45,6 +45,19 @@ describe('overlay page aliases', () => {
   })
 })
 
+describe('settings page aliases', () => {
+  it('serves the settings page at /settings.html, /settings and /settings/index.html', async () => {
+    await mkdir(join(dist, 'settings'), { recursive: true })
+    await writeFile(join(dist, 'settings', 'index.html'), '<!doctype html><title>settings</title>')
+    for (const path of ['/settings.html', '/settings', '/settings/index.html']) {
+      const res = await fetch(`${base}${path}`)
+      expect(res.status, path).toBe(200)
+      expect(res.headers.get('content-type')).toContain('text/html')
+      expect(await res.text()).toContain('settings')
+    }
+  })
+})
+
 describe('asset serving', () => {
   it('serves hashed chunks with the right MIME type', async () => {
     const res = await fetch(`${base}/assets/overlay-DR25IQPC.js`)

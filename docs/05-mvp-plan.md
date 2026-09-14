@@ -110,6 +110,26 @@
 - `main` 字段 = `out/main/index.js`（package.json 早已配置）；便携版日志直接走 stdout，排查方便。
 - packaged userData 沿用 `petween-desktop`（package.json name），与 dev 一致——首装即空数据目录属预期（用户导入图片后才见宠物）。
 
+## Phase 7：桌面设置窗口与可调穿透（✅ 2026-09-14 完成；用户 2026-09-14 确认单窗方案、连接器暂缓）
+
+用户反馈驱动：桌面端需要自己的设置（Connect / 通用 / 穿透可调）；点击穿透体感从未成功（→ 已定位修复 flapping bug `aa263f3`：keep-alive 重申冻结的 hover 结论导致整窗抖动）；设置单窗 vs 双窗（→ 调研后拍板**单窗 + iframe 内嵌**）。
+
+- [x] `desktop-settings.ts`：壳层设置存储（`userData/desktop-settings.json`，防抖持久化 + 变更订阅 + 严格归一化/夹取；**不碰 petween config**）
+- [x] `desktop-routes.ts`：`/api/petween-desktop/*`（settings GET/PUT、status、autolaunch GET/PUT、fix-interaction、dsh-test 探活）——设置页唯一传输通道（无 IPC），dev 走 proxy / prod 同源同一份代码；与 `/api/petween` 命名空间按段边界不冲突
+- [x] 设置页 `src/renderer/settings/`（第二个 vite 入口）：四分区左导航——**连接**（DSH 卡片：启停/端口/实时状态/测试按钮 + 未来连接器占位）、**宠物**（iframe 内嵌 `/petween-editor/`，保持挂载只切可见性防丢草稿；真实数据三栏布局验证过）、**交互**（模式三选 自动/始终穿透/始终可交互、命中外扩 0-24px、鼠标转发开关、自愈开关、救援热键开关、立即修复交互）、**通用**（开机自启镜像 + 版本/数据目录）
+- [x] pointer-through 设置化：`PointerThroughRuntimeOptions` 实时热更（updateOptions 强制重下发让 forward 开关即时生效）；强制模式逃生舱；**自愈**（5s 周期重申 + render-process-gone/powerMonitor resume/显示器增删改/拖动结束后 re-issue——对应 electron#33281/#15376→PR#52633/#49982/#41501 家族）；救援热键 Ctrl+Alt+P 切互斥「交互锁定」（注册失败优雅降级——本机实测被占用，热键可配置列入后续）；`showInactive()` 替代 `show()`（#11049）
+- [x] DSH 桥由设置驱动：启停即时生效（关=纯桌宠模式），端口下轮重连周期生效（`PETWEEN_DSH_PORT` 环境变量仍可覆盖）
+- [x] 单测 +17（70 全绿）：设置存储归一化/持久化/订阅、路由全端点、强制模式与内边距、settings 页别名
+
+**验收（✅ 2026-09-14 真机）**：设置页四分区渲染 ✓；iframe 内嵌编辑器在真实用户数据（deepseek 预设/1254×1254 图）下三栏呈现 ✓（elementFromPoint 证实导航不被遮挡）；模式切「始终穿透」→ 持久化 + 主进程日志实时重新应用 ✓；DSH 关→桥停（探测计数冻结）/开→新桥重启 ✓；二次启动唤起设置窗口显示连接分区 ✓；模式已还原 auto。
+
+**调研沉淀（三个子智能体报告，2026-09-14）**：
+- Electron 穿透坑位全景 + 设置项设计依据（见 pointer-through.ts 注释与上表；watchlist：PR#52631/#52633 合入 44.x 后复验）。
+- 连接器路线图：Claude Code（hooks http handler，6/6 状态显式，**首选**）> opencode（SSE，状态枚举近 1:1）> Codex/Gemini/Cursor（command hooks）> Windsurf/Amp；架构=传输家族（本机 HTTP 监听 / SSE-WS 客户端 / 文件监听）+ NormalizedAgentEvent + per-session 状态机 + watchdog。**连接器实现按用户指示暂缓**。
+- 编辑器可嵌入性：零 frame-busting/XFO/顶层假设，iframe ≥1001px 三栏；`PetweenCard` 不适合替代（跳转卡片）。
+
+**遗留（后续增强清单追加）**：救援热键可配置（本机 Ctrl+Alt+P 被占用）；设置页「连接」分区的连接器卡片槽位已留；穿透调试可视化（显示命中矩形）；Playwright 设置页冒烟。
+
 ## 后续增强（MVP 后，按价值排序）
 
 1. petween 侧 P0-P2 补丁回流（`dependencies` 声明、`./host` 装配桶 exports——见 02 号文档 §6）

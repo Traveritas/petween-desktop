@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { AnimationsStore } from 'petween/host/animations'
 import { AssetStore } from 'petween/host/assets'
 import { ConfigStore } from 'petween/host/config'
@@ -47,6 +48,8 @@ export interface PetweenLocalServer {
   readonly port: number
   readonly relay: StateRelay
   readonly stateChannel: StateChannel
+  /** Register shell-owned routes (e.g. /api/petween-desktop/*) on the same table. */
+  readonly webServer: { register(route: WebRoute): () => void }
   close(): Promise<void>
 }
 
@@ -123,6 +126,7 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
     port: (server.address() as AddressInfo).port,
     relay,
     stateChannel,
+    webServer: table.host.webServer,
     close: () => {
       if (closed) return Promise.resolve()
       closed = true
