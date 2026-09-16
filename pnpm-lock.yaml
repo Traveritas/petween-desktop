@@ -20,6 +20,9 @@ importers:
       petween:
         specifier: link:./vendor/petween
         version: link:vendor/petween
+      petween-physics:
+        specifier: link:./vendor/petween-physics
+        version: link:vendor/petween-physics
       react:
         specifier: ^18.3.1
         version: 18.3.1

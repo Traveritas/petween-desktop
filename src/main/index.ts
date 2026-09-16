@@ -24,13 +24,17 @@ import { connectDshSocket } from './dsh-bridge/ws-socket'
 import { getAutoLaunch, setAutoLaunch } from './login-item'
 import { importLegacyData, legacyHomeHasData, targetHomeCanImport } from './legacy-import'
 import { startPetweenLocalServer, type PetweenLocalServer } from './local-server'
+import { assemblePhysics } from './physics-assembly'
 import { attachPointerThrough, type PointerThroughHandle, type PointerThroughRuntimeOptions } from './pointer-through'
 import { createOverlayWindow, loadOverlayPage } from './overlay-window'
 import { openSettingsWindow } from './settings-window'
 import { createPetweenTray } from './tray'
 import type { TrayMenuState } from './tray-menu'
 
-const RESCUE_HOTKEY = 'Control+Alt+P'
+const RESCUE_HOTKEY_CANDIDATES = ['Control+Alt+P', 'Control+Alt+I', 'Control+Alt+U']
+/** always-interactive auto-reverts after this window — the final safety net
+ *  when the mode swallows every OS mouse click (2026-09-16 incident). */
+const FORCED_INTERACTIVE_REVERT_MS = 60_000
 
 let isQuitting = false
 let server: PetweenLocalServer | null = null
@@ -39,6 +43,8 @@ let pointerThrough: PointerThroughHandle | null = null
 let openSettings: (() => void) | null = null
 let dshStatus: { connected: boolean; detail?: string } = { connected: false }
 let bridgeRestart: ((settings: DesktopSettings) => void) | null = null
+let forcedInteractiveTimer: ReturnType<typeof setTimeout> | null = null
+let rescueHotkey: string | null = null
 
 app.on('before-quit', () => {
   isQuitting = true
@@ -77,15 +83,36 @@ function dshPortOf(settings: DesktopSettings): number {
 }
 
 function syncRescueHotkey(settings: DesktopSettings): void {
-  const want = settings.clickThrough.rescueHotkeyEnabled
-  if (want) {
-    const registered = globalShortcut.register(RESCUE_HOTKEY, () => {
-      const locked = pointerThrough?.toggleInteractiveLock()
-      console.log(`[petween-desktop] rescue hotkey: lock ${locked ? 'ON' : 'off'}`)
-    })
-    if (!registered) console.warn(`[petween-desktop] rescue hotkey ${RESCUE_HOTKEY} registration failed (occupied?)`)
+  const onRescue = (): void => {
+    const locked = pointerThrough?.toggleInteractiveLock()
+    console.log(`[petween-desktop] rescue hotkey (${rescueHotkey}): lock ${locked ? 'ON' : 'off'}`)
+  }
+  if (settings.clickThrough.rescueHotkeyEnabled) {
+    if (rescueHotkey !== null) return // already registered
+    rescueHotkey = RESCUE_HOTKEY_CANDIDATES.find((accelerator) => globalShortcut.register(accelerator, onRescue)) ?? null
+    if (rescueHotkey === null) {
+      console.warn(`[petween-desktop] all rescue hotkey candidates occupied: ${RESCUE_HOTKEY_CANDIDATES.join(', ')}`)
+    } else if (rescueHotkey !== RESCUE_HOTKEY_CANDIDATES[0]) {
+      console.log(`[petween-desktop] rescue hotkey ${RESCUE_HOTKEY_CANDIDATES[0]} occupied — using ${rescueHotkey}`)
+    }
   } else {
-    globalShortcut.unregister(RESCUE_HOTKEY)
+    if (rescueHotkey !== null) globalShortcut.unregister(rescueHotkey)
+    rescueHotkey = null
+  }
+}
+
+/** The forced-interactive mode eats every OS click — auto-revert it. */
+function armForcedInteractiveRevert(next: DesktopSettings): void {
+  if (forcedInteractiveTimer !== null) {
+    clearTimeout(forcedInteractiveTimer)
+    forcedInteractiveTimer = null
+  }
+  if (next.clickThrough.mode === 'always-interactive') {
+    forcedInteractiveTimer = setTimeout(() => {
+      forcedInteractiveTimer = null
+      console.warn('[petween-desktop] always-interactive auto-reverted to auto after 60s (mouse safety net)')
+      settingsStore?.update({ clickThrough: { mode: 'auto' } })
+    }, FORCED_INTERACTIVE_REVERT_MS)
   }
 }
 
@@ -111,6 +138,14 @@ async function bootstrap(): Promise<void> {
     port,
   })
   console.log(`[petween-desktop] local-server on http://127.0.0.1:${server.port} (data: ${dataRoot})`)
+
+  // petween-physics host half (docs/05 Phase 8C): config route + default
+  // bounce animation; data root independent under userData.
+  const physics = assemblePhysics({
+    host: { webServer: server.webServer },
+    petweenHostService: server.petweenHostService,
+    configPath: join(app.getPath('userData'), 'petween-physics', 'config.json'),
+  })
 
   const legacyRoot = dshHomePath('petween')
 
@@ -198,12 +233,15 @@ async function bootstrap(): Promise<void> {
   if (settings.dsh.enabled) startBridge()
   tray.update(trayState())
 
-  // Live-apply settings: click-through options + rescue hotkey + bridge.
+  // Live-apply settings: click-through options + rescue hotkey + bridge +
+  // the forced-interactive auto-revert safety net.
   settingsStore.onChange((next) => {
     pointerThrough?.updateOptions(pointerOptions(next))
     syncRescueHotkey(next)
+    armForcedInteractiveRevert(next)
     bridgeRestart?.(next)
   })
+  armForcedInteractiveRevert(settings)
 
   const overlay = createOverlayWindow()
   pointerThrough = attachPointerThrough(overlay, pointerOptions(settings))
@@ -218,7 +256,9 @@ async function bootstrap(): Promise<void> {
   })
 
   app.on('quit', () => {
-    globalShortcut.unregister(RESCUE_HOTKEY)
+    if (rescueHotkey !== null) globalShortcut.unregister(rescueHotkey)
+    if (forcedInteractiveTimer !== null) clearTimeout(forcedInteractiveTimer)
+    physics.dispose()
     bridge?.close()
     tray.destroy()
     void server?.close()

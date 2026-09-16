@@ -18,7 +18,8 @@
     "noEmit": true,
     "types": ["node"],
     "paths": {
-      "petween/*": ["./vendor/petween/src/*"]
+      "petween/*": ["./vendor/petween/src/*"],
+      "petween-physics/*": ["./vendor/petween-physics/src/*"]
     }
   },
   "include": ["src", "electron.vite.config.ts", "vitest.config.ts"]

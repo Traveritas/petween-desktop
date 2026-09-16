@@ -11,9 +11,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { DesktopSettings } from '../../main/desktop-settings'
+import { listCompanions } from '../companions'
 import './settings.css'
 
-type Section = 'connect' | 'pet' | 'pointer' | 'general'
+type Section = 'connect' | 'pet' | 'pointer' | 'plugins' | 'general'
 
 interface StatusResponse {
   dsh: { enabled: boolean; connected: boolean; detail?: string }
@@ -26,6 +27,7 @@ const SECTIONS: Array<{ id: Section; label: string; hint: string }> = [
   { id: 'connect', label: '连接', hint: 'Agent 状态源' },
   { id: 'pet', label: '宠物', hint: '姿势 / 动画 / 预设' },
   { id: 'pointer', label: '交互', hint: '点击穿透与命中' },
+  { id: 'plugins', label: '插件', hint: '伴生行为模块' },
   { id: 'general', label: '通用', hint: '启动与信息' },
 ]
 
@@ -40,7 +42,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 function useSettings(): {
   settings: DesktopSettings | null
-  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']> }>) => void
+  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']>; companions: Partial<DesktopSettings['companions']> }>) => void
 } {
   const [settings, setSettings] = useState<DesktopSettings | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -61,12 +63,17 @@ function useSettings(): {
   const patch = useCallback((next: Record<string, unknown>) => {
     pending.current = { ...pending.current, ...next }
     // optimistic local apply so controls feel instant
-    const optimistic = pending.current as { clickThrough?: Partial<DesktopSettings['clickThrough']>; dsh?: Partial<DesktopSettings['dsh']> }
+    const optimistic = pending.current as {
+      clickThrough?: Partial<DesktopSettings['clickThrough']>
+      dsh?: Partial<DesktopSettings['dsh']>
+      companions?: Partial<DesktopSettings['companions']>
+    }
     if (latest.current !== null) {
       setSettings({
         ...latest.current,
         clickThrough: { ...latest.current.clickThrough, ...optimistic.clickThrough },
         dsh: { ...latest.current.dsh, ...optimistic.dsh },
+        companions: { ...latest.current.companions, ...optimistic.companions },
       })
     }
     if (timer.current !== null) clearTimeout(timer.current)
@@ -209,7 +216,7 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
           [
             ['auto', '自动', '按宠物区域命中切换'],
             ['always-through', '始终穿透', '宠物不可点击（完全放行）'],
-            ['always-interactive', '始终可交互', '整屏窗口接收鼠标（逃生用）'],
+            ['always-interactive', '始终可交互', '整屏接收鼠标——仅本次会话，60 秒后自动恢复'],
           ] as const
         ).map(([value, label, hint]) => (
           <label key={value} className={`mode ${ct.mode === value ? 'active' : ''}`}>
@@ -252,8 +259,8 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         onChange={(next) => props.patch({ clickThrough: { selfHealing: next } })}
       />
       <Toggle
-        label="救援热键（Ctrl+Alt+P）"
-        hint="按下在“锁定可交互 / 恢复自动”间切换，宠物卡死时用"
+        label="救援热键"
+        hint="按下在「锁定可交互 / 恢复自动」间切换（自动选用可用组合，默认 Ctrl+Alt+P）"
         checked={ct.rescueHotkeyEnabled}
         onChange={(next) => props.patch({ clickThrough: { rescueHotkeyEnabled: next } })}
       />
@@ -272,6 +279,38 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
           执行
         </button>
       </div>
+    </section>
+  )
+}
+
+function PluginsSection(props: { settings: DesktopSettings; patch: ReturnType<typeof useSettings>['patch'] }): JSX.Element {
+  const companions = listCompanions()
+  return (
+    <section className="card">
+      <h2>插件</h2>
+      <p className="sectionHint">伴生行为模块（运行在宠物旁，如投掷物理）。关闭即时生效，重新开启后立即挂载。</p>
+      {companions.length === 0 && <p className="sectionHint">当前构建中没有注册任何插件。</p>}
+      {companions.map((companion) => {
+        const enabled = props.settings.companions.enabled[companion.id] !== false
+        const Card = companion.SettingsCard
+        return (
+          <div key={companion.id} className="companionBlock">
+            <Toggle
+              label={companion.displayName}
+              hint={companion.description ?? companion.id}
+              checked={enabled}
+              onChange={(next) =>
+                props.patch({ companions: { enabled: { ...props.settings.companions.enabled, [companion.id]: next } } })
+              }
+            />
+            {enabled && Card !== undefined && (
+              <div className="companionCard">
+                <Card />
+              </div>
+            )}
+          </div>
+        )
+      })}
     </section>
   )
 }
@@ -342,6 +381,7 @@ function App(): JSX.Element {
         </div>
         {active === 'connect' && <ConnectSection settings={settings} patch={patch} status={status} />}
         {active === 'pointer' && <PointerSection settings={settings} patch={patch} />}
+        {active === 'plugins' && <PluginsSection settings={settings} patch={patch} />}
         {active === 'general' && <GeneralSection status={status} />}
       </main>
     </div>

@@ -1,3 +1,6 @@
 [submodule "vendor/petween"]
 	path = vendor/petween
 	url = https://github.com/Traveritas/petween.git
+[submodule "vendor/petween-physics"]
+	path = vendor/petween-physics
+	url = https://github.com/Traveritas/petween-physics.git

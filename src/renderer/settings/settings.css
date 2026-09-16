@@ -121,6 +121,16 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 
 .connector { border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; margin-bottom: 12px; }
 .connector.placeholder { opacity: 0.55; }
+
+.companionBlock { margin-bottom: 16px; }
+.companionBlock .row { border-bottom: none; }
+.companionCard {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px 14px;
+  /* the companion card brings its own (petween-styled) inner layout */
+  background: var(--bg);
+}
 .connectorHead { display: flex; align-items: center; gap: 8px; padding: 10px 0 2px; }
 .connectorState { color: var(--muted); font-size: 13px; }
 .dot {

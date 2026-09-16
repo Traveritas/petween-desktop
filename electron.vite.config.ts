@@ -12,6 +12,7 @@ import { DEV_LOCAL_PORT } from './src/main/dev-port'
  * the .ts sources have to be bundled.
  */
 const petweenSrc = fileURLToPath(new URL('./vendor/petween/src', import.meta.url))
+const physicsSrc = fileURLToPath(new URL('./vendor/petween-physics/src', import.meta.url))
 const rendererRoot = fileURLToPath(new URL('./src/renderer', import.meta.url))
 
 /**
@@ -23,9 +24,9 @@ const localServerTarget = `http://127.0.0.1:${DEV_LOCAL_PORT}`
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['petween'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['petween', 'petween-physics'] })],
     resolve: {
-      alias: { petween: petweenSrc },
+      alias: { petween: petweenSrc, 'petween-physics': physicsSrc },
     },
   },
   preload: {
@@ -46,12 +47,13 @@ export default defineConfig({
     root: rendererRoot,
     plugins: [react()],
     resolve: {
-      alias: { petween: petweenSrc },
+      alias: { petween: petweenSrc, 'petween-physics': physicsSrc },
     },
     server: {
       proxy: {
         '/api/petween': { target: localServerTarget },
         '/api/petween-desktop': { target: localServerTarget },
+        '/api/petween-physics': { target: localServerTarget },
         '/petween-assets': { target: localServerTarget },
       },
     },

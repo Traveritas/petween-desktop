@@ -39,6 +39,15 @@ describe('normalizeDesktopSettings', () => {
     expect(settings.dsh.enabled).toBe(false)
     expect(settings.dsh.port).toBe(9999)
   })
+
+  it('persisted load demotes always-interactive to auto (mouse safety, 2026-09-16 incident)', () => {
+    // The mode swallows every OS click; it must never survive a restart.
+    expect(normalizeDesktopSettings({ clickThrough: { mode: 'always-interactive' } }, { persisted: true }).clickThrough.mode).toBe('auto')
+    // always-through is the safe direction and may persist.
+    expect(normalizeDesktopSettings({ clickThrough: { mode: 'always-through' } }, { persisted: true }).clickThrough.mode).toBe('always-through')
+    // live updates keep it — the settings toggle must work in-session.
+    expect(normalizeDesktopSettings({ clickThrough: { mode: 'always-interactive' } }).clickThrough.mode).toBe('always-interactive')
+  })
 })
 
 describe('createDesktopSettingsStore', () => {

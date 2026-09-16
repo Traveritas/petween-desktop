@@ -24,6 +24,7 @@ import { planMotionPackImport } from 'petween/host/packs'
 import { registerRoutes, type RoutesDeps } from 'petween/host/routes'
 import { attachStateChannel, type StateChannel } from 'petween/host/state-channel'
 import { ensurePresetAuthority } from 'petween/host/migrate-v2'
+import { createPetweenHostService, type PetweenHostService } from 'petween/host/service'
 import { createRouteTable } from './routes-host'
 import { createStateRelay, type StateRelay } from './state-relay'
 import { registerOverlayStatic } from './overlay-static'
@@ -50,6 +51,11 @@ export interface PetweenLocalServer {
   readonly stateChannel: StateChannel
   /** Register shell-owned routes (e.g. /api/petween-desktop/*) on the same table. */
   readonly webServer: { register(route: WebRoute): () => void }
+  /**
+   * The petween companion host service — companion plugins (petween-physics)
+   * register shared animations through it. Exposed since Phase 8.
+   */
+  readonly petweenHostService: PetweenHostService
   close(): Promise<void>
 }
 
@@ -117,6 +123,9 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
       : registerOverlayStatic(table.host, options.rendererDistDir)
   const relay = createStateRelay(table.host.webServer)
   const stateChannel = attachStateChannel(relay.host)
+  // The companion host service (Phase 8): petween-physics registers its
+  // default bounce animation through this — same call the DSH entry makes.
+  const petweenHostService = createPetweenHostService(animationsStore)
 
   const server = createServer(table.handleRequest)
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, '127.0.0.1', resolve))
@@ -127,6 +136,7 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
     relay,
     stateChannel,
     webServer: table.host.webServer,
+    petweenHostService,
     close: () => {
       if (closed) return Promise.resolve()
       closed = true

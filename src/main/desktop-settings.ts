@@ -26,6 +26,13 @@ export interface DesktopSettings {
     enabled: boolean
     port: number
   }
+  /**
+   * Companion enable map (docs/05 Phase 8): absent id = enabled, explicit
+   * false disables. The compile-time registry provides ids/display names.
+   */
+  companions: {
+    enabled: Record<string, boolean>
+  }
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -39,6 +46,9 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   dsh: {
     enabled: true,
     port: 3080,
+  },
+  companions: {
+    enabled: {},
   },
 }
 
@@ -55,12 +65,27 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
     : fallback
 }
 
-/** Merge-Validates a partial/persisted shape onto the defaults; unknown keys drop. */
-export function normalizeDesktopSettings(input: unknown): DesktopSettings {
+/**
+ * Merge-Validates a partial/persisted shape onto the defaults; unknown keys drop.
+ *
+ * `persisted: true` (loading from disk) demotes 'always-interactive' back to
+ * 'auto': that mode makes the full-screen overlay swallow EVERY mouse click
+ * in the OS, so it must never survive an app restart — an user who quit in
+ * that state would boot into a machine they cannot click (2026-09-16
+ * incident). Live updates keep it (the settings UI toggle must work).
+ */
+export function normalizeDesktopSettings(input: unknown, options: { persisted?: boolean } = {}): DesktopSettings {
   const raw = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>
   const ct = (typeof raw.clickThrough === 'object' && raw.clickThrough !== null ? raw.clickThrough : {}) as Record<string, unknown>
   const dsh = (typeof raw.dsh === 'object' && raw.dsh !== null ? raw.dsh : {}) as Record<string, unknown>
-  const mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
+  const companions = (typeof raw.companions === 'object' && raw.companions !== null ? raw.companions : {}) as Record<string, unknown>
+  const enabled = (typeof companions.enabled === 'object' && companions.enabled !== null ? companions.enabled : {}) as Record<string, unknown>
+  const enabledMap: Record<string, boolean> = {}
+  for (const [id, value] of Object.entries(enabled)) {
+    if (typeof value === 'boolean') enabledMap[id] = value
+  }
+  let mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
+  if (options.persisted === true && mode === 'always-interactive') mode = 'auto'
   return {
     clickThrough: {
       mode,
@@ -75,6 +100,7 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
       enabled: typeof dsh.enabled === 'boolean' ? dsh.enabled : true,
       port: clampNumber(dsh.port, PORT_MIN, PORT_MAX, DEFAULT_DESKTOP_SETTINGS.dsh.port),
     },
+    companions: { enabled: enabledMap },
   }
 }
 
@@ -92,7 +118,7 @@ const WRITE_DEBOUNCE_MS = 250
 export async function createDesktopSettingsStore(filePath: string): Promise<DesktopSettingsStore> {
   let settings: DesktopSettings = DEFAULT_DESKTOP_SETTINGS
   try {
-    settings = normalizeDesktopSettings(JSON.parse(await readFile(filePath, 'utf8')))
+    settings = normalizeDesktopSettings(JSON.parse(await readFile(filePath, 'utf8')), { persisted: true })
   } catch {
     // missing or corrupt file: defaults (first boot)
   }
@@ -117,7 +143,7 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
     get: () => settings,
     update(patch) {
       // The patch may be a full document or a partial one — deep-merge at the
-      // two known section levels, then validate.
+      // known section levels, then validate.
       const merged = {
         ...(settings as unknown as Record<string, unknown>),
         ...(typeof patch === 'object' && patch !== null ? (patch as Record<string, unknown>) : {}),
@@ -128,6 +154,10 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
         dsh: {
           ...(settings.dsh as unknown as Record<string, unknown>),
           ...((patch as { dsh?: Record<string, unknown> })?.dsh ?? {}),
+        },
+        companions: {
+          ...(settings.companions as unknown as Record<string, unknown>),
+          ...((patch as { companions?: Record<string, unknown> })?.companions ?? {}),
         },
       }
       settings = normalizeDesktopSettings(merged)
