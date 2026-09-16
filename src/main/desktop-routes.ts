@@ -29,7 +29,30 @@ export interface DesktopRoutesDeps {
 
 const BODY_LIMIT_BYTES = 64 * 1024
 
+/**
+ * The browser-page write fence both vendor route modules implement (petween
+ * routes.ts rejectsCrossOriginWrite): a malicious webpage may land simple
+ * no-preflight POSTs unless Sec-Fetch-Site/Origin say cross-site. Local
+ * processes (no Origin header) stay allowed — that trust boundary is
+ * documented in docs/05.
+ */
+function rejectsCrossOriginWrite(req: IncomingMessage): boolean {
+  const site = req.headers['sec-fetch-site']
+  if (typeof site === 'string' && site === 'cross-site') return true
+  const origin = req.headers.origin
+  if (origin !== undefined) {
+    if (typeof origin !== 'string' || typeof req.headers.host !== 'string') return true
+    try {
+      return new URL(origin).host !== req.headers.host
+    } catch {
+      return true
+    }
+  }
+  return false
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  if (res.destroyed || res.writableEnded) return // client aborted mid-flight
   const text = JSON.stringify(body)
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -43,23 +66,26 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
+    let overflowed = false
+    req.on('error', reject)
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > BODY_LIMIT_BYTES) {
+        if (overflowed) return
+        overflowed = true
         reject(new Error('body too large'))
-        req.destroy()
         return
       }
       chunks.push(chunk)
     })
     req.on('end', () => {
+      if (overflowed) return // already rejected
       try {
         resolve(chunks.length === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString('utf8')))
       } catch (error) {
         reject(error)
       }
     })
-    req.on('error', reject)
   })
 }
 
@@ -70,7 +96,27 @@ export function registerDesktopRoutes(
   const disposers: Array<() => void> = []
 
   const exact = (path: string, handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>): void => {
-    disposers.push(host.webServer.register({ kind: 'exact', path, handler: (req, res) => void handler(req, res) }))
+    disposers.push(
+      host.webServer.register({
+        kind: 'exact',
+        path,
+        handler: (req, res) => {
+          res.on('error', () => {}) // aborted client sockets must not crash the host
+          void Promise.resolve(handler(req, res)).catch((error: unknown) => {
+            console.error('[petween-desktop] desktop route handler threw', error)
+            sendJson(res, 500, { error: { code: 'INTERNAL', message: 'handler failed' } })
+          })
+        },
+      }),
+    )
+  }
+  const fence = (req: IncomingMessage, res: ServerResponse): boolean => {
+    if (req.method === 'GET' || req.method === 'HEAD') return false
+    if (rejectsCrossOriginWrite(req)) {
+      sendJson(res, 403, { error: { code: 'CROSS_ORIGIN', message: 'cross-origin writes are rejected' } })
+      return true
+    }
+    return false
   }
 
   exact('/api/petween-desktop/settings', (req, res) => {
@@ -79,6 +125,7 @@ export function registerDesktopRoutes(
       return
     }
     if (req.method === 'PUT') {
+      if (fence(req, res)) return
       void readJsonBody(req).then(
         (patch) => sendJson(res, 200, { settings: deps.settings.update(patch) }),
         () => sendJson(res, 400, { error: { code: 'BAD_JSON', message: 'invalid JSON body' } }),
@@ -102,6 +149,7 @@ export function registerDesktopRoutes(
       return
     }
     if (req.method === 'PUT') {
+      if (fence(req, res)) return
       void readJsonBody(req).then(
         (body) => {
           const enabled = (body as { enabled?: unknown }).enabled
@@ -124,6 +172,7 @@ export function registerDesktopRoutes(
       sendJson(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'expected POST' } })
       return
     }
+    if (fence(req, res)) return
     deps.fixInteraction()
     sendJson(res, 200, { ok: true })
   })
@@ -133,6 +182,7 @@ export function registerDesktopRoutes(
       sendJson(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'expected POST' } })
       return
     }
+    if (fence(req, res)) return
     void readJsonBody(req).then(
       async (body) => {
         const port = (body as { port?: unknown }).port

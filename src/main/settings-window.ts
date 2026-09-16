@@ -29,7 +29,9 @@ export function openSettingsWindow(load: SettingsWindowLoad, options: SettingsWi
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
-    minWidth: 1120, // keep the embedded editor's three-column layout (>=1001px) reachable
+    // 1001px (editor three-column) + 191px nav + ~16px window frame:
+    // at 1120 the pane only got ~913px and the layout silently degraded.
+    minWidth: 1210,
     minHeight: 700,
     title: 'Petween 设置',
     show: false,
@@ -41,9 +43,13 @@ export function openSettingsWindow(load: SettingsWindowLoad, options: SettingsWi
   settingsWindow = win
   win.once('ready-to-show', () => win.show())
   if (load.devUrl !== undefined) {
-    void win.loadURL(`${load.devUrl}/settings/index.html`)
+    void win.loadURL(`${load.devUrl}/settings/index.html`).catch((error: unknown) => {
+      console.error('[petween-desktop] settings page failed to load', error)
+    })
   } else {
-    void win.loadURL(`http://127.0.0.1:${load.serverPort}/settings.html`)
+    void win.loadURL(`http://127.0.0.1:${load.serverPort}/settings.html`).catch((error: unknown) => {
+      console.error('[petween-desktop] settings page failed to load', error)
+    })
   }
   win.on('close', (event) => {
     if (options.shouldHideOnClose()) {

@@ -47,10 +47,13 @@ export function createOverlayWindow(): BrowserWindow {
 
 /** Loads the overlay page: dev = vite dev server (proxied API), prod = local-server (same origin). */
 export function loadOverlayPage(win: BrowserWindow, options: { devUrl?: string; serverPort?: number }): void {
+  const failed = (error: unknown): void => {
+    console.error('[petween-desktop] overlay page failed to load — pet invisible', error)
+  }
   if (options.devUrl !== undefined) {
-    void win.loadURL(`${options.devUrl}/overlay/index.html`)
+    void win.loadURL(`${options.devUrl}/overlay/index.html`).catch(failed)
   } else if (options.serverPort !== undefined) {
-    void win.loadURL(`http://127.0.0.1:${options.serverPort}/overlay.html`)
+    void win.loadURL(`http://127.0.0.1:${options.serverPort}/overlay.html`).catch(failed)
   } else {
     throw new Error('overlay window needs either a dev URL or the local-server port')
   }

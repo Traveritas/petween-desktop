@@ -4,11 +4,12 @@ Petween 的独立 Windows 桌面版：把 [petween](https://github.com/Traverita
 
 - 宠物联动本地 DSH（`dsh web`）的 agent 状态：思考 / 工作 / 等待审批 / 成功 / 出错；DSH 未运行时为纯装饰模式。
 - 与 DSH 插件形态共享同一份 core（git submodule 单一上游），配置/宠物/动画/资产数据模型完全一致，支持从 `~/.dsh/petween` 一次性导入（托盘菜单 →「从 DSH 导入数据…」）。
-- 桌宠窗口透明置顶、点击穿透（宠物本体之外的区域完全放行鼠标）；托盘常驻，二次启动唤起设置窗口。
+- 桌宠窗口透明置顶、点击穿透（宠物本体之外的区域完全放行鼠标）；救援热键兜底；托盘常驻，二次启动唤起设置窗口。
+- 投掷物理伴生插件：拖住宠物甩出，重力下落与屏幕边缘弹跳（设置 → 插件 可调参数/启停）。
 
 ## 状态
 
-🚧 MVP 实现完成（Phase 0~5 已落地并真机验证；Phase 6 构建分发配置就绪，发布项待拍板——见下）。
+✅ v0.1.0（2026-09-16）：Phase 0~8 全部完成并通过真机验收——含桌面设置窗口（连接/宠物/交互/插件/通用）、点击穿透三通道与救援热键、DSH 状态桥（真机联测通过）、以及伴生插件体系与首个伴生「投掷物理」（拖住宠物甩出：重力 + 屏幕边缘弹跳 + 撞击特效）。发布项待拍板——见下。
 
 - 可行性结论与风险：[docs/01-eval.md](docs/01-eval.md)
 - 架构与装配指南：[docs/02-architecture.md](docs/02-architecture.md)
@@ -34,7 +35,7 @@ cd vendor/petween && pnpm install && pnpm run build && pnpm vitest run
 cd ../.. && pnpm install && pnpm dev
 ```
 
-- `pnpm test`：壳层单测（51 用例，不启动 Electron）
+- `pnpm test`：壳层单测（89 用例，不启动 Electron）
 - `pnpm typecheck`：tsc 全量（含 petween 源码）
 - `pnpm dist:win`：构建 submodule → electron-vite 三段构建 → electron-builder（NSIS + 便携版 `dist/win-unpacked/Petween.exe`）
 
@@ -42,4 +43,4 @@ cd ../.. && pnpm install && pnpm dev
 
 ## 许可
 
-待定（跟随 petween 主仓库的授权决策）。
+MIT（与 petween / petween-physics 一致）。

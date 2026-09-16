@@ -23,8 +23,14 @@ if (container === null) throw new Error('petween-desktop: #root container missin
 createRoot(container).render(<PetOverlay />)
 
 // Click-through signaling runs outside React: it must survive overlays
-// remounting and never depend on component lifecycles.
-startPointerSignal()
+// remounting and never depend on component lifecycles. A missing preload
+// (path/config corruption) must degrade loudly, not strand the overlay in
+// permanent click-through with dead companions.
+if (window.petweenDesktop === undefined) {
+  console.error('[petween-desktop] preload bridge missing — pointer signaling and companions disabled')
+} else {
+  startPointerSignal()
+}
 
 // Companions: poll the enable map, remount on any change.
 let companionDisposer: (() => void) | null = null

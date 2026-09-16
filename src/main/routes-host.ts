@@ -56,7 +56,14 @@ export function createRouteTable(): RouteTable {
         res.writeHead(404).end()
         return
       }
-      void route.handler(req, res)
+      try {
+        void route.handler(req, res)
+      } catch (error) {
+        // A throwing handler must not escape into an uncaught exception —
+        // vendor routes wrap themselves; this covers the shell's own.
+        console.error('[petween-desktop] route handler threw', error)
+        if (!res.headersSent) res.writeHead(500).end()
+      }
     },
     list: () => routes,
   }

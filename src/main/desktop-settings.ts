@@ -3,7 +3,8 @@
  * under userData; petween's config is never touched). Pure Node: the path is
  * injected, writes are debounced, invalid fields clamp to defaults.
  */
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ClickThroughMode } from './pointer-through-logic'
 
@@ -105,8 +106,14 @@ export interface DesktopSettingsStore {
   /** Validates + persists (debounced) + notifies listeners; returns the fresh value. */
   update(patch: unknown): DesktopSettings
   onChange(listener: (settings: DesktopSettings) => void): () => void
-  /** Flush a pending debounced write (app quit). */
+  /** Flush a pending debounced write (async). */
   flush(): Promise<void>
+  /**
+   * Synchronous flush for the quit path — Electron's quit handler cannot
+   * await, and an un-drained debounce window would drop the last change
+   * (2026-09-16 review finding). The file is tiny; writes are rare.
+   */
+  flushSync(): void
 }
 
 const WRITE_DEBOUNCE_MS = 250
@@ -121,17 +128,33 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
 
   const listeners = new Set<(settings: DesktopSettings) => void>()
   let writeTimer: ReturnType<typeof setTimeout> | null = null
+  // Writes always CHAIN (never replace the in-flight promise): a flush racing
+  // a just-fired debounce must not let an older writeFile land after a newer
+  // one and persist stale content.
   let writing: Promise<void> = Promise.resolve()
+
+  const serialize = (): string => JSON.stringify(settings, null, 2)
+
+  const writeNow = (): Promise<void> => {
+    const content = serialize()
+    const attempt = async (): Promise<void> => {
+      try {
+        await writeFile(filePath, content, 'utf8')
+      } catch {
+        // First write into a fresh data dir: create parents, retry once.
+        await mkdir(dirname(filePath), { recursive: true })
+        await writeFile(filePath, content, 'utf8')
+      }
+    }
+    writing = writing.then(attempt, attempt)
+    return writing
+  }
 
   const persist = (): void => {
     if (writeTimer !== null) return
     writeTimer = setTimeout(() => {
       writeTimer = null
-      writing = writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8').catch(async () => {
-        // First write into a fresh data dir: create parents, retry once.
-        await mkdir(dirname(filePath), { recursive: true })
-        await writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8')
-      })
+      void writeNow()
     }, WRITE_DEBOUNCE_MS)
   }
 
@@ -169,12 +192,27 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
       if (writeTimer !== null) {
         clearTimeout(writeTimer)
         writeTimer = null
-        writing = writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8').catch(async () => {
-          await mkdir(dirname(filePath), { recursive: true })
-          await writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8')
-        })
+        await writeNow()
+        return
       }
       await writing
+    },
+    flushSync() {
+      if (writeTimer !== null) {
+        clearTimeout(writeTimer)
+        writeTimer = null
+      }
+      const content = serialize()
+      try {
+        writeFileSync(filePath, content, 'utf8')
+      } catch {
+        try {
+          mkdirSync(dirname(filePath), { recursive: true })
+          writeFileSync(filePath, content, 'utf8')
+        } catch (error) {
+          console.error('[petween-desktop] settings flushSync failed', error)
+        }
+      }
     },
   }
 }

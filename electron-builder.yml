@@ -11,6 +11,7 @@ files:
   # petween 的 TS 源码已打进 out/main（externalizeDepsPlugin exclude）；
   # link: 依赖不能被 builder 跟进整个 submodule。运行时需要的只有上面的 editor.js。
   - '!node_modules/petween'
+  - '!node_modules/petween-physics'
   # react/react-dom 只在构建期被 bundle 进 renderer，运行时无人 require
   - '!node_modules/react'
   - '!node_modules/react-dom'

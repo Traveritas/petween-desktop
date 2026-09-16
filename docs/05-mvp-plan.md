@@ -84,7 +84,7 @@
 ## Phase 5：系统集成（✅ 2026-09-12 完成；开机自启重启系统生效待用户复验）
 
 - [x] 单实例锁 + `second-instance` 唤起设置窗（✅ 真机验证：二次启动立即退出、首实例弹设置窗）
-- [x] 托盘：打开设置 / 退出 / DSH 连接状态显示（bridge onStatus → 菜单重建）/ 开机自启勾选（**开/关用完全相同 path/args**，login-item.ts 显式空 args；dev 下禁用勾选防注册裸 electron.exe）；`resources/tray.png` 32x32 生成入库；Tray 实例模块级引用防 GC
+- [x] 托盘：打开设置 / 退出 / DSH 连接状态显示（bridge onStatus → 菜单重建）/ 开机自启勾选〔Phase 8 后设置页另有镜像开关〕（**开/关用完全相同 path/args**，login-item.ts 显式空 args；dev 下禁用勾选防注册裸 electron.exe）；`resources/tray.png` 32x32 生成入库；Tray 实例模块级引用防 GC
 - [x] settings 窗口 close→hide（`shouldHideOnClose` 谓词注入，托盘退出经 before-quit 翻转）；`window-all-closed` 不退出（空处理器）
 - [x] `display-metrics-changed` / 分辨率变化重新铺满（Phase 2 已做：具名监听器 + closed 移除）
 - [x] 「从 DSH 导入数据」菜单项：**自写 `legacy-import.ts`**（copy-if-absent：assets/assets.json/animations/pets，绝不覆盖已有；config 不动、导入后在编辑器里手选宠物预设）。原因：petween 的 `migrateLegacyHome` 目标目录存在即 skip——桌面版首启后 dataRoot 必然存在，该函数无法用于运行时导入（docs/02 §2 清单里它的适用场景是 DSH 侧目录改名）。确认对话框 + 结果对话框。
@@ -174,7 +174,7 @@
 
 **8D 真机验收（✅ 用户 2026-09-16 确认）**
 - [x] 插件分区 + PhysicsCard（22 控件）渲染 ✓；physics config API 真机伺服 ✓
-- [x] 全量回归：壳层 78 用例 + physics 上游 166 用例 + petween 基线 1044 用例全绿
+- [x] 全量回归：壳层用例（Phase 8 时 78，里程碑评审后 89）+ physics 上游 166 用例 + petween 基线 1044 用例全绿
 - [ ] 投掷手感参数微调（用户日常使用中按需调 PhysicsCard 参数）
 
 **实施记录（含一次事故）**：
@@ -183,8 +183,42 @@
 - **排查顺带证实**：穿透三通道（转发 hit-test/光标轮询/滞回）在真实数据下判定全部正确。
 - **待办**：`dist:win` 前需在 electron-builder.yml files 加 `!node_modules/petween-physics`（防止 link 跟进 submodule）；dev 长会话中 main 热重启监视器偶发失灵（重启 dev 即恢复，低优先级记录）。
 
+
+## v0.1.0 里程碑评审（2026-09-16，五路子智能体综合评审）
+
+评审维度：主进程架构 / 渲染层 / 测试覆盖 / 文档一致性 / 安全与打包。**结论：零 P0；4 个 P1 与一批 P2 已当场修复；其余入后续 backlog。** 修复后全量回归 89 用例全绿。
+
+### 已修复（随本里程碑提交）
+
+- **P1 打包**：electron-builder files 补 `!node_modules/petween-physics`（防 link 跟进 submodule）。
+- **P1 设置持久化**：desktop-settings 写链化（消除 debounce/flush 并发写竞态）+ `flushSync()`（quit 处理器同步写，防抖窗口内的最后修改不再丢失）。
+- **P1 启动失败无头僵尸**：bootstrap().catch → showErrorBox + quit。
+- **P1 设置窗 minWidth**：1120 → 1210（1001px iframe 三栏 + 191px 导航 + 边框的算术此前不成立）。
+- **P1 设置 PUT 竞态**：渲染端 seq 守卫（过期响应不回写）+ 失败重入队重试（≤3 次）；GET 失败退避重试（≤5 次）。
+- **P2 服务端**：server.listen 错误拒绝；路由分发 500 包装；desktop-routes 跨源写栅栏（对齐 petween 上游 `rejectsCrossOriginWrite`）+ res error sink + sendJson destroyed 守卫 + 超载响应先答后断。
+- **P2 渲染端**：loadURL 失败日志；preload 缺失守卫（不再静默永久穿透）；modePicker 双列；PhysicsCard 暗色令牌注入（`--dsh-alias-*` on .companionCard，零上游改动）。
+- **测试盲区补齐**：pointer-through 胶水（vi.mock electron，8 用例：IPC 净化/发送者守卫/drag 重锚/锁定/forward 传递/自愈/销毁）；dsh-client 信封契约（假 http 服务器）；flushSync 退出窗口竞态。
+
+### 评审确认的坚实面（记录在案）
+
+桥 FSM 的 epoch 纪律、穿透纯逻辑/监听器卫生、local-server 装配保真度、overlay-static 双层路径穿越防护、loopback-only 姿态（无出网）、单 IPC 通道 + 发送者/形状双验证、双窗口 sandbox/contextIsolation、vendor 侧输入限额体系。
+
+### Backlog（按价值排序，未修项）
+
+1. DSH 端口热改即时生效（现为下一重连周期；桥跟踪已连端口即可 stop+start）。
+2. 测试：真实 relay+attachStateChannel+SSE 端到端；ws-socket 真适配器契约；overlay companion 重挂载循环。
+3. 设置页 status 轮询可见性门控；autolaunch PUT 失败重同步；overlay sync epoch 守卫。
+4. CSP dev/prod 差异化（prod 去 17777 字面量）；可选 Host 头检查 + proxy changeOrigin（DNS rebinding 加固）。
+5. bridge 循环崩溃自动重入退避；救援热键策略抽纯模块；dsh-bridge maxPayload/mounted 上限（恶意 DSH 硬化）。
+6. 上游 backlog：petween 编辑器页 CSP（上游补丁清单）。
+7. dev 长会话 main 热重启监视器偶发失灵（重启 dev 恢复）。
+
+### 信任边界（安全评审结论记录）
+
+本地 loopback API 无鉴权是**接受的设计边界**：任意本地进程本就能直接读写同用户权限的文件与注册表（含同一 HKCU Run 键），API 未提供越权能力；自启开关只能切换 Petween 自身（path/args 硬编码）。浏览器页攻击面已由跨源写栅栏 + 无 CORS 头 + 随机端口覆盖。若未来连接器引入真正特权动作，再考虑 token 化。
+
 ## 待用户拍板项
 
-- [ ] GitHub 仓库名 / appId（`com.traveritas.petween`?）与 publish 目标仓库
+- [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）
 - [ ] 数据目录策略确认：独立 `userData/petween-home/` + 一次性从 `~/.dsh/petween` 导入（02 号文档 §4 的推荐）
 - [ ] 是否需要 macOS 支持（穿透/托盘 API 有平台差异，MVP 只验 Windows）

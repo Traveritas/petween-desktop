@@ -3,10 +3,10 @@
  * /api/petween-desktop/* endpoints — no Electron IPC — so dev (vite proxy)
  * and prod (same-origin local-server) behave identically.
  *
- * Four sections: 连接 (agent state sources; DSH today, connector slots
+ * Five sections: 连接 (agent state sources; DSH today, connector slots
  * later), 宠物 (the petween editor embedded in a same-origin iframe, kept
  * mounted so a dirty draft survives section switches), 交互 (click-through
- * behavior + rescue), 通用 (auto-launch, info).
+ * behavior + rescue), 插件 (companions), 通用 (auto-launch, info).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -48,14 +48,28 @@ function useSettings(): {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pending = useRef<Record<string, unknown>>({})
   const latest = useRef<DesktopSettings | null>(null)
+  const flushSeq = useRef(0)
   latest.current = settings
 
   useEffect(() => {
-    void api<{ settings: DesktopSettings }>('/api/petween-desktop/settings').then(
-      (body) => setSettings(body.settings),
-      (error) => console.error('petween-desktop: settings load failed', error),
-    )
+    let alive = true
+    let attempt = 0
+    const load = (): void => {
+      void api<{ settings: DesktopSettings }>('/api/petween-desktop/settings').then(
+        (body) => {
+          if (alive) setSettings(body.settings)
+        },
+        (error) => {
+          // retry with backoff — a stuck "加载设置…" page helps nobody
+          attempt += 1
+          if (alive && attempt < 5) setTimeout(load, 500 * attempt)
+          else console.error('petween-desktop: settings load failed', error)
+        },
+      )
+    }
+    load()
     return () => {
+      alive = false
       if (timer.current !== null) clearTimeout(timer.current)
     }
   }, [])
@@ -80,15 +94,37 @@ function useSettings(): {
     timer.current = setTimeout(() => {
       const body = pending.current
       pending.current = {}
-      void api<{ settings: DesktopSettings }>('/api/petween-desktop/settings', {
-        method: 'PUT',
-        body: JSON.stringify(body),
-      }).then(
-        (result) => setSettings(result.settings),
-        (error) => console.error('petween-desktop: settings save failed', error),
-      )
+      sendPatch(body, 1)
     }, 300)
   }, [])
+
+  /** PUT a patch; stale responses never apply, failures re-queue and retry. */
+  const sendPatch = (body: Record<string, unknown>, attempt: number): void => {
+    flushSeq.current += 1
+    const seq = flushSeq.current
+    void api<{ settings: DesktopSettings }>('/api/petween-desktop/settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }).then(
+      (result) => {
+        if (seq === flushSeq.current) setSettings(result.settings)
+      },
+      (error) => {
+        console.error(`petween-desktop: settings save failed (attempt ${attempt})`, error)
+        if (attempt >= 3) return // drop after 3 tries; next user edit re-queues
+        // re-queue the failed patch under any newer pending edits
+        pending.current = { ...body, ...pending.current }
+        if (timer.current === null) {
+          timer.current = setTimeout(() => {
+            timer.current = null
+            const retry = pending.current
+            pending.current = {}
+            sendPatch(retry, attempt + 1)
+          }, 1000 * attempt)
+        }
+      },
+    )
+  }
 
   return { settings, patch }
 }

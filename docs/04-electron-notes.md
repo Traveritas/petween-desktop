@@ -98,7 +98,7 @@ publish: { provider: github, owner: Traveritas, repo: <tbd> }
 - IPC 契约：mock `ipcMain`/`contextBridge` 锁 channel 名与 payload 形状。
 - E2E（少量冒烟）：Playwright `_electron.launch` 起真实例，断言窗口数/托盘存在/设置页可开；**透明与穿透的视觉效果保留人工 checklist**。
 
-## 8. 最小可信壳文件结构
+## 8. 最小可信壳文件结构（规划期草图——实际模块见 src/，含 desktop-settings/desktop-routes/pointer-through-*/companions/physics-assembly 等）
 
 ```
 petween-desktop/

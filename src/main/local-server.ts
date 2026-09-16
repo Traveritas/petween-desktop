@@ -128,7 +128,10 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
   const petweenHostService = createPetweenHostService(animationsStore)
 
   const server = createServer(table.handleRequest)
-  await new Promise<void>((resolve) => server.listen(options.port ?? 0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject) // EADDRINUSE/EACCES must reject, not crash
+    server.listen(options.port ?? 0, '127.0.0.1', resolve)
+  })
 
   let closed = false
   return {

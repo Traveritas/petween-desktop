@@ -66,7 +66,7 @@ describe('createDesktopSettingsStore', () => {
     vi.useFakeTimers()
     const dir = await mkdtemp(join(tmpdir(), 'petween-dsettings-'))
     try {
-      const file = join(dir, 'nested', 'desktop-settings.json')
+      const file = join(dir, 'desktop-settings.json')
       const store = await createDesktopSettingsStore(file)
       const seen: number[] = []
       store.onChange((settings) => seen.push(settings.dsh.port))
@@ -83,6 +83,25 @@ describe('createDesktopSettingsStore', () => {
 
       const reopened = await createDesktopSettingsStore(file)
       expect(reopened.get().dsh.port).toBe(4321)
+    } finally {
+      vi.useRealTimers()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('flushSync cancels the pending debounce and writes synchronously (quit path)', async () => {
+    vi.useFakeTimers()
+    const dir = await mkdtemp(join(tmpdir(), 'petween-dsettings-'))
+    try {
+      const file = join(dir, 'nested', 'desktop-settings.json')
+      const store = await createDesktopSettingsStore(file)
+      store.update({ dsh: { port: 7777 } })
+      // NOTE: debounce NOT advanced — this is exactly the quit-window race
+      store.flushSync()
+      const persisted = JSON.parse(await readFile(file, 'utf8'))
+      expect(persisted.dsh.port).toBe(7777)
+      // double flush is safe
+      expect(() => store.flushSync()).not.toThrow()
     } finally {
       vi.useRealTimers()
       await rm(dir, { recursive: true, force: true })

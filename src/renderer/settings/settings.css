@@ -105,7 +105,7 @@ button {
 }
 button:hover { border-color: var(--accent); color: var(--accent); }
 
-.modePicker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 12px; }
+.modePicker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0 12px; }
 .mode {
   display: flex;
   flex-direction: column;
@@ -128,8 +128,30 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 4px 14px;
-  /* the companion card brings its own (petween-styled) inner layout */
   background: var(--bg);
+  /* The companion card reads petween's --dsw-alias-* tokens with light hex
+     fallbacks (its CSS is upstream-owned); define them here so it follows the
+     settings window's theme — the same values the editor page uses. */
+  --dsw-alias-label-primary: #1f2335;
+  --dsw-alias-label-secondary: #6b7280;
+  --dsw-alias-bg-layer-1: #f9fafb;
+  --dsw-alias-bg-layer-2: #ffffff;
+  --dsw-alias-border-l2: #d1d5db;
+  --dsw-alias-brand-primary: #a5b4fc;
+  --dsw-alias-interactive-bg-hover: #eef2ff;
+  --dsw-alias-status-error: #dc2626;
+}
+@media (prefers-color-scheme: dark) {
+  .companionCard {
+    --dsw-alias-label-primary: #c8d0e0;
+    --dsw-alias-label-secondary: #8b93a7;
+    --dsw-alias-bg-layer-1: #1b1e2a;
+    --dsw-alias-bg-layer-2: #222534;
+    --dsw-alias-border-l2: #3a3e52;
+    --dsw-alias-brand-primary: #7aa2f7;
+    --dsw-alias-interactive-bg-hover: #262a3a;
+    --dsw-alias-status-error: #f7768e;
+  }
 }
 .connectorHead { display: flex; align-items: center; gap: 8px; padding: 10px 0 2px; }
 .connectorState { color: var(--muted); font-size: 13px; }

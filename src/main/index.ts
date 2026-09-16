@@ -55,7 +55,13 @@ if (!singleLock) {
   })
 
   app.whenReady().then(() => {
-    void bootstrap()
+    // A startup failure must never leave a headless zombie process (no tray,
+    // no overlay, window-all-closed already neutered) — surface it and quit.
+    bootstrap().catch((error: unknown) => {
+      console.error('[petween-desktop] bootstrap failed', error)
+      dialog.showErrorBox('Petween 启动失败', String(error))
+      app.quit()
+    })
   })
 
   // The pet overlay + tray own the lifetime; an accidental window-all-closed
@@ -240,8 +246,8 @@ async function bootstrap(): Promise<void> {
     physics.dispose()
     bridge?.close()
     tray.destroy()
-    void server?.close()
-    void settingsStore?.flush()
+    void server?.close().catch(() => {})
+    settingsStore?.flushSync()
   })
 }
 

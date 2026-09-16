@@ -45,7 +45,7 @@ petween client 侧全部 HTTP 是**根相对路径**（`client/api.ts`、`state-
 | `attachStateChannel(host, opts?)` | `host/state-channel.ts` | 桥实现 `StateChannelHost` 的 4 个 `on()`；SSE/心跳/快照端点白拿 |
 | `planMotionPackImport` 等 | `host/packs.ts` | `RoutesDeps.importPack` 用 |
 | `registerEditorPage(host, deps?)` | `host/editor-page.ts` | **必须注入 `loadBundle: () => readFile('<petween>/lib/editor.js')`**——默认按 `import.meta.url` 找包，deep import 态会 404 |
-| `createPetweenHostService(store)` | `host/service.ts` | 桌面版无伴生插件，可跳过 |
+| `createPetweenHostService(store)` | `host/service.ts` | Phase 8 起启用：physics 伴生经它注册动画（local-server 暴露） |
 | `normalizeSessionEvent` / `normalizeAgentStatus` / `normalizeAgentError` | `integration/dsh/event-normalizer.ts` | 桥的输出端 |
 
 ## 3. Client 半装配清单（overlay 窗口）

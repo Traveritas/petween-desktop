@@ -30,12 +30,12 @@ petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 +
 | `docs/02-architecture.md` | 目标架构 + **host/client 装配清单** + 工程边界 + dev/prod 同源设计 | 写任何装配代码前 |
 | `docs/03-dsh-bridge-spec.md` | DSH 状态桥规格级契约（帧格式/生命周期/9 条转换） | 写 dsh-bridge 前，**不需要再读 DSH 源码** |
 | `docs/04-electron-notes.md` | Electron 44 技术要点（透明窗/穿透/托盘/打包/测试，含已知坑与 issue 号） | 写壳层代码前 |
-| `docs/05-mvp-plan.md` | **执行入口**：Phase 0~6 任务清单 + 验收标准 | 任何时候——当前进度记录于此 |
+| `docs/05-mvp-plan.md` | **执行入口**：Phase 0~8 任务清单 + 验收标准 + v0.1.0 里程碑评审 | 任何时候——当前进度记录于此 |
 
 ## 4. 关键架构决策速览
 
 1. **Electron 44.x**（main = 完整 Node 24，现有 host 代码零重写）。Tauri 已否决（详见 docs/01 §4）。原 petween 规格「禁止 Electron/Tauri」是 V1 插件形态决策，**桌面版不受该条约束**——不要被 `vendor/petween` 内旧文档的禁令误导。
-2. **全程同源**：petween client 侧 HTTP 全是根相对路径，prod 两窗口 `loadURL('http://127.0.0.1:<random>/...')`，dev 用 electron-vite `server.proxy` 代理 `/api/petween`、`/petween-assets`、`/petween-editor` 到 local-server——这是「零改动 petween」的前提。
+2. **全程同源**：petween client 侧 HTTP 全是根相对路径，prod 两窗口 `loadURL('http://127.0.0.1:<random>/...')`，dev 用 electron-vite `server.proxy` 代理 `/api/petween`、`/api/petween-desktop`、`/api/petween-physics`、`/petween-assets` 到 local-server（编辑器 iframe 直接指向 local-server origin，不走代理）——这是「零改动 petween」的前提。
 3. **overlay 全屏透明窗**：`setBounds(display.bounds)` 铺满（**不用 fullscreen/maximize**）、`alwaysOnTop('screen-saver')`、`focusable:false`；MVP 单显示器单窗。
 4. **点击穿透三层**：`setIgnoreMouseEvents(true,{forward:true})` + renderer hit-test（数据源优先 StageSnapshot 的 `bodyRect`）+ **main 光标轮询兜底（必须做**，焦点在别的 App 时转发停摆，electron#33281）+ 4~8px 滞回。
 5. **状态桥双流**：mux 流给 `session/event`，host 流给 `session-removed/session-status/agent-error`——**mux 上没有 disposed 信号**，单开一条流是错的。契约转换共 9 条，逐条列在 docs/03 §7。
@@ -53,6 +53,7 @@ cd vendor/petween && pnpm install && pnpm run build && pnpm vitest run   # 修�
 cd ../.. && pnpm install && pnpm dev                                     # electron-vite 三段式
 pnpm typecheck                                                           # tsc 含 petween 源码
 pnpm test                                                                # 壳层单测（vitest node 环境）
+pnpm dist:win                                                            # petween 构建 → 三段构建 → NSIS+便携版
 ```
 
 注意：pnpm 10 拦截依赖构建脚本，`pnpm.onlyBuiltDependencies`（electron/esbuild）已写入 package.json；Electron 二进制缺失时跑 `node node_modules/electron/install.js`。
@@ -72,7 +73,8 @@ pnpm test                                                                # 壳�
 - 后续增强入口 = docs/05「后续增强」清单（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、physics 移植、多显示器、救援热键可配置等）。
 - **2026-09-16：Phase 8 完成**（伴生插件宿主 + physics-desktop：companion 注册表/插件分区/设置启停；physics 上游双宿主入口 `./desktop` 已推送 `0bbc914`；本仓库第二 submodule）。
 - **2026-09-16（晚）：DSH 真机联测通过（Phase 4 验收关闭）；`dsh web` 断链修复**（profile `link:` 路径与 petween node_modules 均因仓库搬迁悬空，均已修复）；**always-interactive 模式整体移除**（用户拍板：整屏吃鼠标、与救援热键瞬时锁定重叠；残留值归一化为 auto）。
-- 待办与后续增强入口 = docs/05「后续增强」清单与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）；**发版前必做**：electron-builder.yml 加 `!node_modules/petween-physics` 排除。
+- **2026-09-16（夜）：v0.1.0 里程碑**——五路子智能体综合评审（主进程/渲染层/测试/文档/安全），零 P0、4 个 P1 + 一批 P2 当场修复（打包排除、设置持久化竞态与 flushSync、启动兜底、minWidth 算术、PUT 竞态、跨源写栅栏、测试盲区补齐），89 用例全绿后打标签；评审记录与 backlog 见 docs/05「v0.1.0 里程碑评审」。
+- 待办与后续增强入口 = docs/05「后续增强」清单、「v0.1.0 里程碑评审 backlog」与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）。~~发版前必做：builder 排除~~（✅ 评审时已修）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则
