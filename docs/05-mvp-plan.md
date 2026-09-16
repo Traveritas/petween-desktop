@@ -132,14 +132,17 @@
 
 ## 后续增强（MVP 后，按价值排序）
 
-1. petween 侧 P0-P2 补丁回流（`dependencies` 声明、`./host` 装配桶 exports——见 02 号文档 §6）
-2. 「跟随 DSH 当前会话」状态源（替代 aggregate）
-3. petween-physics 移植：`petween/client` 扩展服务改进程内直连暴露（接口本体 cordis-free 可平移）；ThrowController 视口从「DSH 网页视口」参数化到「OS 屏幕边界」
-4. 多显示器每屏一窗
-5. 其他 agent 状态源（Claude Code hooks 等）——桥是可插拔的，这是「通用 Agent 桌宠」方向
-6. 动态 `setShape` 备用穿透方案
+1. **连接器：Claude Code**（已调研 2026-09-14：hooks http handler 主动 POST 到本机端口，6/6 宠物状态显式覆盖，桥接成本最低）→ opencode（SSE，状态枚举近 1:1）→ Codex/Gemini/Cursor
+2. petween 侧 P0-P2 补丁回流（`dependencies` 声明、`./host` 装配桶 exports——见 02 号文档 §6；现有三仓库源码消费，P0 越发值得）
+3. 「跟随 DSH 当前会话」状态源（替代 aggregate）
+4. 救援热键可配置（现为固定候选链 P/I/U）
+5. 穿透调试可视化（命中矩形叠加显示）
+6. 多显示器每屏一窗
+7. Playwright 设置页/打包版冒烟自动化
+8. 动态 `setShape` 备用穿透方案（疑难机器）
+9. ~~petween-physics 移植~~（✅ Phase 8 完成，双宿主形态）
 
-## Phase 8：伴生插件宿主 + physics-desktop（📋 规划稿 2026-09-16，待开工）
+## Phase 8：伴生插件宿主 + physics-desktop（✅ 2026-09-16 完成；用户真机确认「基本没问题」）
 
 > 背景：用户提出桌面端插件化问题。结论（2026-09-16 多轮确认）：**不做 DSH 式插件平台，做最小 companion 宿主**——插件化已发生在 petween 层（`petween/client` 服务契约 + 伴生模式），桌面侧只需 hosting 该契约；连接器（main，事件源）与伴生（overlay 渲染进程，控制面）两类插件分开抽象。外部进程插件/用户态安装留待触发信号（≥2 第三方作者 / 需运行时装卸 / 连接器生态化）。
 
@@ -152,36 +155,33 @@
 
 ### 工作分解（A/B 可并行）
 
-**8A companion 宿主机制（桌面仓库，~半天）**
-- [ ] `src/renderer/companion/registry.ts`：`DesktopCompanion` 接口（`{ id, displayName, init(ctx): dispose? }`，ctx = petween 单例 + 启停通知）+ 注册表 + try/catch 崩溃隔离
-- [ ] desktop-settings 加 `companions: { enabled: Record<string, boolean> }`（默认全启用）
-- [ ] 设置页加「插件」分区：列出已注册 companion（名称/开关）
-- [ ] 单测：注册表启停/隔离/设置往返
+**8A companion 宿主机制（✅）**
+- [x] `src/renderer/companions/registry.ts`：`DesktopCompanion` 接口（`{ id, displayName, description?, SettingsCard?, init(ctx): dispose? }`，ctx = petween 单例）+ 注册表 + try/catch 崩溃隔离
+- [x] desktop-settings 加 `companions: { enabled: Record<string, boolean> }`（缺省=启用）
+- [x] 设置页「插件」分区：toggle + SettingsCard 托管
+- [x] overlay 入口按设置挂载（3s 轮询差量重挂载）；单测 5 用例
 
-**8B petween-physics 双宿主化（上游仓库，~半天-1天）**
-- [ ] 新增 `src/desktop/index.ts`：`createDesktopCompanion({ dataDir, webServer }) → DesktopCompanion`（单例 service + ThrowController + host 路由工厂挂载）
-- [ ] package.json exports 补 `"./desktop"`；tsdown 构建（产物完备性；桌面按源码消费）
-- [ ] 上游 commit + push（用户仓库）
-- [ ] 双宿主三纪律写进 petween 生态文档（petween repo docs 或 physics README）
+**8B petween-physics 双宿主化（✅ 上游 `0bbc914` 已推送）**
+- [x] `src/desktop/index.ts`：`createPhysicsDesktopCompanion()`（ThrowController + §12 拉推 + visibility settle；viewport = overlay 窗口）
+- [x] exports `"./desktop"` + tsdown `lib/desktop.js`（ESM、react external）
+- [x] README「Desktop 宿主形态」：三条纪律 + 契约镜像说明
 
-**8C physics-desktop 装配（桌面仓库，~1天）**
-- [ ] submodule `vendor/petween-physics`（锁定 commit；验证其与 petween b0763e1 的兼容，必要时 bump）
-- [ ] link: 依赖 + vite alias / tsconfig paths / vitest alias 三处同源（照抄 petween 模式）
-- [ ] 注册 physics companion；host 路由挂 local-server route table，数据根 `userData/petween-physics/`
-- [ ] 设置页「插件」分区出 physics 条目（PhysicsCard 托管或入口链接）
-- [ ] 单测：装配级（physics config API 经桌面 route table 可达、启停生效）
+**8C physics-desktop 装配（✅）**
+- [x] submodule `vendor/petween-physics` 锁 `0bbc914`（submodule 内无需 install/build——源码消费，其依赖由根 node_modules 满足）
+- [x] link: 依赖 + vite(main/renderer)/tsconfig/vitest 四处别名 + `/api/petween-physics` 代理
+- [x] local-server 暴露 petween companion host service（`createPetweenHostService`）；`physics-assembly.ts`（config 存储注入 userData、路由挂共享表、默认弹跳动画注册）
+- [x] 注册 physics companion（SettingsCard = PhysicsCard）；装配级单测 2 用例
 
-**8D 真机验收（~半天 + 手感调校）**
-- [ ] 投掷/弹跳在 2560×1600 的体感（默认参数调校）
-- [ ] 拖拽 × 穿透 × 投掷三方交互（dragging 标志、排他租约、拖动结束 reissue 的咬合）
-- [ ] 弹跳移动中穿透命中判定是否跟得上（bodyRect 快照推送频率 vs 250ms 轮询；不行则命中余量跟随速度）
-- [ ] 启停即时生效；回归：壳层用例 + petween 1044 基线 + physics 上游测试全绿
+**8D 真机验收（✅ 用户 2026-09-16 确认）**
+- [x] 插件分区 + PhysicsCard（22 控件）渲染 ✓；physics config API 真机伺服 ✓
+- [x] 全量回归：壳层 78 用例 + physics 上游 166 用例 + petween 基线 1044 用例全绿
+- [ ] 投掷手感参数微调（用户日常使用中按需调 PhysicsCard 参数）
 
-### 风险预置
-
-- physics 帧循环期间命中区域滞后（见 8D 第三条，预案：速度感知的命中余量）
-- 双 submodule 的构建链复杂度（electeron-vite externals/alias 处理两份，模式可复制）
-- petween-physics 0.2.0 对 petween 版本的兼容窗口（开工首日验证）
+**实施记录（含一次事故）**：
+- **2026-09-16 鼠标卡死事故**：调试期间把模式切到 always-interactive 且被持久化 → 整屏窗吃掉系统所有鼠标点击（键盘不受影响，overlay focusable:false）；救援热键 Ctrl+Alt+P 被占用注册失败 → 无逃生口。三层防线已落地：持久化加载降级 auto / 会话内 60s 自动回落 / 热键链式注册（P→I→U）。
+- **坐标空间教训**：本机 2560×1600@100%，overlay CSS 视口 = 2560×1600；computer-use 截图 raster 是半采样（1280×800）——换算 raster×2=CSS。给视觉模型喂先验坐标会得到顺从性误判（报错误位置"确认存在"），验收要以 config overlay 值/bodyRect 等数据源为准。
+- **排查顺带证实**：穿透三通道（转发 hit-test/光标轮询/滞回）在真实数据下判定全部正确。
+- **待办**：`dist:win` 前需在 electron-builder.yml files 加 `!node_modules/petween-physics`（防止 link 跟进 submodule）；dev 长会话中 main 热重启监视器偶发失灵（重启 dev 即恢复，低优先级记录）。
 
 ## 待用户拍板项
 

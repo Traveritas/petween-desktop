@@ -12,10 +12,12 @@ Petween 的独立桌面版：Electron 壳 + DSH 状态桥，把现有 DSH Web UI
 
 ```
 petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 + 计划）
-└── vendor/petween          ← git submodule → github.com/Traveritas/petween（锁定 b0763e1）
+├── vendor/petween          ← git submodule → github.com/Traveritas/petween（锁定 b0763e1）
+└── vendor/petween-physics  ← git submodule → github.com/Traveritas/petween-physics（锁定 0bbc914）
 ```
 
-- **petween 是唯一上游，不允许分叉**。桌面化过程中发现必须改 petween 源码时：在 `vendor/petween` 内 commit → push 上游 → 本仓库 bump submodule 指针（产生一个指针提交）。禁止把 petween 代码复制进本仓库。
+- **petween 与 petween-physics 都是唯一上游，不允许分叉**。改动在 submodule 内 commit → push 上游 → 本仓库 bump 指针。physics 的双宿主约定（`./desktop` 入口 + 三纪律）见其 README。
+- physics submodule 无需 install/build（桌面源码消费，其依赖由根 node_modules 满足）；petween submodule 仍需 install+build（editor.js 产物）。
 - **MVP 目标是零改动 petween**（装配级复用已核实可行，见 docs/02）；petween 侧可选补丁清单（P0~P3）在 docs/02 §6，做则回流。
 - 本仓库产物发布不影响 petween 的 DSH 插件形态；两形态共享同一份 core 演进。
 - submodule 基线：`git submodule update --init --recursive`（clone 后必跑，AGENTS 会话开始时如果 vendor/petween 是空目录就是这个原因）。
@@ -68,8 +70,9 @@ pnpm test                                                                # 壳�
 - **2026-09-14：穿透 flapping bug 修复**（keep-alive 重申冻结 hover 结论致整窗抖动；hover 有效性绑定 mousemove 年龄，`aa263f3`）。
 - **2026-09-14：Phase 7 完成**（桌面设置窗口：单窗四分区 + iframe 内嵌 petween 编辑器；desktop-settings 存储 + /api/petween-desktop 路由；穿透设置化——模式三选/命中外扩/转发开关/自愈重申/救援热键；DSH 桥设置驱动启停。70 用例全绿，真机验收过；连接器架构已调研、实现暂缓）。
 - 后续增强入口 = docs/05「后续增强」清单（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、physics 移植、多显示器、救援热键可配置等）。
-- petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）。
-- DSH 契约基线：0.1.0-rc.7（嵌套 rc.8），官方 web 前端走同款 `/api` 通道，桥的规格按 docs/03 实现。
+- **2026-09-16：Phase 8 完成**（伴生插件宿主 + physics-desktop：companion 注册表/插件分区/设置启停；physics 上游双宿主入口 `./desktop` 已推送 `0bbc914`；本仓库第二 submodule。含鼠标卡死事故的三层安全防线：always-interactive 不持久化/60s 自动回落/救援热键链式注册。78 用例全绿）。
+- 待办与后续增强入口 = docs/05「后续增强」清单与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）；**发版前必做**：electron-builder.yml 加 `!node_modules/petween-physics` 排除。
+- petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则
 
