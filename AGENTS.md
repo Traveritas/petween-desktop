@@ -70,7 +70,8 @@ pnpm test                                                                # 壳�
 - **2026-09-14：穿透 flapping bug 修复**（keep-alive 重申冻结 hover 结论致整窗抖动；hover 有效性绑定 mousemove 年龄，`aa263f3`）。
 - **2026-09-14：Phase 7 完成**（桌面设置窗口：单窗四分区 + iframe 内嵌 petween 编辑器；desktop-settings 存储 + /api/petween-desktop 路由；穿透设置化——模式三选/命中外扩/转发开关/自愈重申/救援热键；DSH 桥设置驱动启停。70 用例全绿，真机验收过；连接器架构已调研、实现暂缓）。
 - 后续增强入口 = docs/05「后续增强」清单（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、physics 移植、多显示器、救援热键可配置等）。
-- **2026-09-16：Phase 8 完成**（伴生插件宿主 + physics-desktop：companion 注册表/插件分区/设置启停；physics 上游双宿主入口 `./desktop` 已推送 `0bbc914`；本仓库第二 submodule。含鼠标卡死事故的三层安全防线：always-interactive 不持久化/60s 自动回落/救援热键链式注册。78 用例全绿）。
+- **2026-09-16：Phase 8 完成**（伴生插件宿主 + physics-desktop：companion 注册表/插件分区/设置启停；physics 上游双宿主入口 `./desktop` 已推送 `0bbc914`；本仓库第二 submodule）。
+- **2026-09-16（晚）：DSH 真机联测通过（Phase 4 验收关闭）；`dsh web` 断链修复**（profile `link:` 路径与 petween node_modules 均因仓库搬迁悬空，均已修复）；**always-interactive 模式整体移除**（用户拍板：整屏吃鼠标、与救援热键瞬时锁定重叠；残留值归一化为 auto）。
 - 待办与后续增强入口 = docs/05「后续增强」清单与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）；**发版前必做**：electron-builder.yml 加 `!node_modules/petween-physics` 排除。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）；petween-physics 基线：10 文件 / 166 用例。
 

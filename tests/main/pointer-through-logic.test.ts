@@ -171,15 +171,6 @@ describe('forced modes (stuck-state escapes)', () => {
     expect(state.interactive).toBe(false)
     expect(state.bodyRect).toEqual(RECT) // still tracked for an instant return to auto
   })
-
-  it('always-interactive ignores everything the other way', () => {
-    const state = decideInteractive(
-      inputs({ cursorScreen: null, signal: null, signalAt: null }),
-      THROUGH,
-      { mode: 'always-interactive', hitPaddingPx: 6 },
-    )
-    expect(state.interactive).toBe(true)
-  })
 })
 
 describe('hit padding option', () => {

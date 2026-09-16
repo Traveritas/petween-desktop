@@ -5,8 +5,9 @@
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { ClickThroughMode } from './pointer-through-logic'
 
-export type ClickThroughMode = 'auto' | 'always-through' | 'always-interactive'
+export type { ClickThroughMode }
 
 export interface DesktopSettings {
   clickThrough: {
@@ -57,7 +58,7 @@ const HIT_PADDING_MAX = 24
 const PORT_MIN = 1
 const PORT_MAX = 65_535
 
-const MODES: readonly ClickThroughMode[] = ['auto', 'always-through', 'always-interactive']
+const MODES: readonly ClickThroughMode[] = ['auto', 'always-through']
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -67,14 +68,10 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 
 /**
  * Merge-Validates a partial/persisted shape onto the defaults; unknown keys drop.
- *
- * `persisted: true` (loading from disk) demotes 'always-interactive' back to
- * 'auto': that mode makes the full-screen overlay swallow EVERY mouse click
- * in the OS, so it must never survive an app restart — an user who quit in
- * that state would boot into a machine they cannot click (2026-09-16
- * incident). Live updates keep it (the settings UI toggle must work).
+ * 'always-interactive' was removed 2026-09-16 (user decision — it swallowed
+ * every OS mouse click); any persisted/live occurrence normalizes to 'auto'.
  */
-export function normalizeDesktopSettings(input: unknown, options: { persisted?: boolean } = {}): DesktopSettings {
+export function normalizeDesktopSettings(input: unknown): DesktopSettings {
   const raw = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>
   const ct = (typeof raw.clickThrough === 'object' && raw.clickThrough !== null ? raw.clickThrough : {}) as Record<string, unknown>
   const dsh = (typeof raw.dsh === 'object' && raw.dsh !== null ? raw.dsh : {}) as Record<string, unknown>
@@ -84,8 +81,7 @@ export function normalizeDesktopSettings(input: unknown, options: { persisted?: 
   for (const [id, value] of Object.entries(enabled)) {
     if (typeof value === 'boolean') enabledMap[id] = value
   }
-  let mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
-  if (options.persisted === true && mode === 'always-interactive') mode = 'auto'
+  const mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
   return {
     clickThrough: {
       mode,
@@ -118,7 +114,7 @@ const WRITE_DEBOUNCE_MS = 250
 export async function createDesktopSettingsStore(filePath: string): Promise<DesktopSettingsStore> {
   let settings: DesktopSettings = DEFAULT_DESKTOP_SETTINGS
   try {
-    settings = normalizeDesktopSettings(JSON.parse(await readFile(filePath, 'utf8')), { persisted: true })
+    settings = normalizeDesktopSettings(JSON.parse(await readFile(filePath, 'utf8')))
   } catch {
     // missing or corrupt file: defaults (first boot)
   }

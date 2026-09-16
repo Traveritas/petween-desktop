@@ -32,9 +32,6 @@ import { createPetweenTray } from './tray'
 import type { TrayMenuState } from './tray-menu'
 
 const RESCUE_HOTKEY_CANDIDATES = ['Control+Alt+P', 'Control+Alt+I', 'Control+Alt+U']
-/** always-interactive auto-reverts after this window — the final safety net
- *  when the mode swallows every OS mouse click (2026-09-16 incident). */
-const FORCED_INTERACTIVE_REVERT_MS = 60_000
 
 let isQuitting = false
 let server: PetweenLocalServer | null = null
@@ -43,7 +40,6 @@ let pointerThrough: PointerThroughHandle | null = null
 let openSettings: (() => void) | null = null
 let dshStatus: { connected: boolean; detail?: string } = { connected: false }
 let bridgeRestart: ((settings: DesktopSettings) => void) | null = null
-let forcedInteractiveTimer: ReturnType<typeof setTimeout> | null = null
 let rescueHotkey: string | null = null
 
 app.on('before-quit', () => {
@@ -101,20 +97,7 @@ function syncRescueHotkey(settings: DesktopSettings): void {
   }
 }
 
-/** The forced-interactive mode eats every OS click — auto-revert it. */
-function armForcedInteractiveRevert(next: DesktopSettings): void {
-  if (forcedInteractiveTimer !== null) {
-    clearTimeout(forcedInteractiveTimer)
-    forcedInteractiveTimer = null
-  }
-  if (next.clickThrough.mode === 'always-interactive') {
-    forcedInteractiveTimer = setTimeout(() => {
-      forcedInteractiveTimer = null
-      console.warn('[petween-desktop] always-interactive auto-reverted to auto after 60s (mouse safety net)')
-      settingsStore?.update({ clickThrough: { mode: 'auto' } })
-    }, FORCED_INTERACTIVE_REVERT_MS)
-  }
-}
+/** The forced-interactive mode was removed 2026-09-16 — nothing to guard. */
 
 async function bootstrap(): Promise<void> {
   const isDev = !app.isPackaged
@@ -233,15 +216,12 @@ async function bootstrap(): Promise<void> {
   if (settings.dsh.enabled) startBridge()
   tray.update(trayState())
 
-  // Live-apply settings: click-through options + rescue hotkey + bridge +
-  // the forced-interactive auto-revert safety net.
+  // Live-apply settings: click-through options + rescue hotkey + bridge.
   settingsStore.onChange((next) => {
     pointerThrough?.updateOptions(pointerOptions(next))
     syncRescueHotkey(next)
-    armForcedInteractiveRevert(next)
     bridgeRestart?.(next)
   })
-  armForcedInteractiveRevert(settings)
 
   const overlay = createOverlayWindow()
   pointerThrough = attachPointerThrough(overlay, pointerOptions(settings))
@@ -257,7 +237,6 @@ async function bootstrap(): Promise<void> {
 
   app.on('quit', () => {
     if (rescueHotkey !== null) globalShortcut.unregister(rescueHotkey)
-    if (forcedInteractiveTimer !== null) clearTimeout(forcedInteractiveTimer)
     physics.dispose()
     bridge?.close()
     tray.destroy()

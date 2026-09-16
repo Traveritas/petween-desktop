@@ -73,7 +73,7 @@
 - [x] 状态源：aggregate 模式（不装 CurrentSessionSource，petween §14.5 fallback 自动生效）
 - [x] 单测：帧转换逐条对照 03 号文档（信封/解释/忽略集 14 用例）+ 退避参数边界 + FSM fixture 驱动（降级循环/双流接线/订阅差集/心跳判死/握手超时/close 清理 8 用例）
 
-**验收（✅ 2026-09-12 假 DSH 真机端到端）**：起最小假 DSH（实现 describe + 双 WS 流规格帧）→ 桥经**真实 WebSocket/HTTP** 连接 → SSE 流完整走出 `turn-start → thinking → tool-start(command) → tool-end → success → idle`（每帧对应 docs/03 §2 转换正确；idle 时间戳走本机时钟验证第 7 条）；杀假 DSH → 探测退避 → 重启 → 自动重连 + 基线重放（快照保留 lastBySession 验证）。**真 DSH 联测（`dsh web` 在跑时思考→thinking、完成→success、DSH 重启→无残留）待用户复验。**
+**验收（✅ 2026-09-12 假 DSH 真机端到端；✅ 2026-09-16 用户真 DSH 联测通过「测试成功，基本没问题」）**：起最小假 DSH（实现 describe + 双 WS 流规格帧）→ 桥经**真实 WebSocket/HTTP** 连接 → SSE 流完整走出 `turn-start → thinking → tool-start(command) → tool-end → success → idle`（每帧对应 docs/03 §2 转换正确；idle 时间戳走本机时钟验证第 7 条）；杀假 DSH → 探测退避 → 重启 → 自动重连 + 基线重放（快照保留 lastBySession 验证）。真 DSH 场景（`dsh web` + 桌面版并行）用户复验通过。
 
 **实施记录**：
 - 帧解释与 FSM 全部纯函数/注入式（socket/describe/时钟可换 fake），fake-timer 驱动 8 个 FSM 场景。
@@ -178,7 +178,7 @@
 - [ ] 投掷手感参数微调（用户日常使用中按需调 PhysicsCard 参数）
 
 **实施记录（含一次事故）**：
-- **2026-09-16 鼠标卡死事故**：调试期间把模式切到 always-interactive 且被持久化 → 整屏窗吃掉系统所有鼠标点击（键盘不受影响，overlay focusable:false）；救援热键 Ctrl+Alt+P 被占用注册失败 → 无逃生口。三层防线已落地：持久化加载降级 auto / 会话内 60s 自动回落 / 热键链式注册（P→I→U）。
+- **2026-09-16 鼠标卡死事故**：调试期间把模式切到 always-interactive 且被持久化 → 整屏窗吃掉系统所有鼠标点击（键盘不受影响，overlay focusable:false）；救援热键 Ctrl+Alt+P 被占用注册失败 → 无逃生口。**用户拍板：该模式整体移除**（与救援热键的瞬时锁定功能重叠且是唯一能卡死鼠标的路径）；救援热键改为链式注册（Ctrl+Alt+P→I→U）。任何残留的 always-interactive 设置值归一化为 auto。
 - **坐标空间教训**：本机 2560×1600@100%，overlay CSS 视口 = 2560×1600；computer-use 截图 raster 是半采样（1280×800）——换算 raster×2=CSS。给视觉模型喂先验坐标会得到顺从性误判（报错误位置"确认存在"），验收要以 config overlay 值/bodyRect 等数据源为准。
 - **排查顺带证实**：穿透三通道（转发 hit-test/光标轮询/滞回）在真实数据下判定全部正确。
 - **待办**：`dist:win` 前需在 electron-builder.yml files 加 `!node_modules/petween-physics`（防止 link 跟进 submodule）；dev 长会话中 main 热重启监视器偶发失灵（重启 dev 即恢复，低优先级记录）。

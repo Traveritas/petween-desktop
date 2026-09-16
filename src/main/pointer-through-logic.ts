@@ -10,10 +10,12 @@
  * AUTO decides: interactive (pet clickable) iff a fresh signal says
  * dragging/hover-hit, OR the cursor sits inside the pet's screen rect —
  * expanded by the hysteresis margin while already interactive so the edge
- * cannot flap. The two forced modes are user escapes for the known
- * stuck-state bugs (#49982 / codex#41465 style wedges): always-through and
- * always-interactive short-circuit the decision but keep tracking the rect
- * so switching back to auto is instant.
+ * cannot flap. always-through is the forced escape for the stuck-interactive
+ * bugs (#49982 / codex#41465 style wedges): it short-circuits the decision
+ * but keeps tracking the rect so switching back to auto is instant.
+ * (A forced always-interactive MODE was removed 2026-09-16 per user
+ * decision: it swallowed every OS mouse click and duplicated the rescue
+ * hotkey's momentary interactive lock.)
  *
  * No Electron imports; unit-tested directly.
  */
@@ -25,7 +27,7 @@ export interface Rect {
   height: number
 }
 
-export type ClickThroughMode = 'auto' | 'always-through' | 'always-interactive'
+export type ClickThroughMode = 'auto' | 'always-through'
 
 export interface PointerThroughOptions {
   mode: ClickThroughMode
@@ -82,9 +84,6 @@ export function decideInteractive(
 
   if (options.mode === 'always-through') {
     return { interactive: false, bodyRect }
-  }
-  if (options.mode === 'always-interactive') {
-    return { interactive: true, bodyRect }
   }
 
   // AUTO: the cursor poll — works with zero renderer cooperation.

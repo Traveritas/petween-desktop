@@ -214,9 +214,8 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
       <div className="modePicker">
         {(
           [
-            ['auto', '自动', '按宠物区域命中切换'],
-            ['always-through', '始终穿透', '宠物不可点击（完全放行）'],
-            ['always-interactive', '始终可交互', '整屏接收鼠标——仅本次会话，60 秒后自动恢复'],
+            ['auto', '自动', '按宠物区域命中切换（默认）'],
+            ['always-through', '始终穿透', '宠物不可点击（完全放行鼠标）'],
           ] as const
         ).map(([value, label, hint]) => (
           <label key={value} className={`mode ${ct.mode === value ? 'active' : ''}`}>
