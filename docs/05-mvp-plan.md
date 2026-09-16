@@ -139,6 +139,50 @@
 5. 其他 agent 状态源（Claude Code hooks 等）——桥是可插拔的，这是「通用 Agent 桌宠」方向
 6. 动态 `setShape` 备用穿透方案
 
+## Phase 8：伴生插件宿主 + physics-desktop（📋 规划稿 2026-09-16，待开工）
+
+> 背景：用户提出桌面端插件化问题。结论（2026-09-16 多轮确认）：**不做 DSH 式插件平台，做最小 companion 宿主**——插件化已发生在 petween 层（`petween/client` 服务契约 + 伴生模式），桌面侧只需 hosting 该契约；连接器（main，事件源）与伴生（overlay 渲染进程，控制面）两类插件分开抽象。外部进程插件/用户态安装留待触发信号（≥2 第三方作者 / 需运行时装卸 / 连接器生态化）。
+
+### 已定决策
+
+1. v1 形态 = **编译期注册的进程内 companion 模块**（overlay renderer import，设置启停，崩溃隔离）；物理这类 60fps 位置控制不走 IPC。
+2. **双宿主约定**：插件仓库自己导出 `./desktop` 入口（与 DSH 入口共享本体代码）；三纪律 = 服务获取收单缝（`petweenClientServiceOf` 模式）、HTTP 全根相对、行为类与 cordis 入口分离。petween-physics 已满足全部三条（已核实：host 半 `configPath` 可注入、路由同形 RoutesHost、提取器 4 行）。
+3. 仓库纪律：`petween-physics` 作为第二个 git submodule（github.com/Traveritas/petween-physics），改动回流上游，桌面只装配。
+4. 配置归属：companion 自身的持久配置走它自己的 host store（physics 有现成的 config API）；desktop-settings 只存**启停**。最薄。
+
+### 工作分解（A/B 可并行）
+
+**8A companion 宿主机制（桌面仓库，~半天）**
+- [ ] `src/renderer/companion/registry.ts`：`DesktopCompanion` 接口（`{ id, displayName, init(ctx): dispose? }`，ctx = petween 单例 + 启停通知）+ 注册表 + try/catch 崩溃隔离
+- [ ] desktop-settings 加 `companions: { enabled: Record<string, boolean> }`（默认全启用）
+- [ ] 设置页加「插件」分区：列出已注册 companion（名称/开关）
+- [ ] 单测：注册表启停/隔离/设置往返
+
+**8B petween-physics 双宿主化（上游仓库，~半天-1天）**
+- [ ] 新增 `src/desktop/index.ts`：`createDesktopCompanion({ dataDir, webServer }) → DesktopCompanion`（单例 service + ThrowController + host 路由工厂挂载）
+- [ ] package.json exports 补 `"./desktop"`；tsdown 构建（产物完备性；桌面按源码消费）
+- [ ] 上游 commit + push（用户仓库）
+- [ ] 双宿主三纪律写进 petween 生态文档（petween repo docs 或 physics README）
+
+**8C physics-desktop 装配（桌面仓库，~1天）**
+- [ ] submodule `vendor/petween-physics`（锁定 commit；验证其与 petween b0763e1 的兼容，必要时 bump）
+- [ ] link: 依赖 + vite alias / tsconfig paths / vitest alias 三处同源（照抄 petween 模式）
+- [ ] 注册 physics companion；host 路由挂 local-server route table，数据根 `userData/petween-physics/`
+- [ ] 设置页「插件」分区出 physics 条目（PhysicsCard 托管或入口链接）
+- [ ] 单测：装配级（physics config API 经桌面 route table 可达、启停生效）
+
+**8D 真机验收（~半天 + 手感调校）**
+- [ ] 投掷/弹跳在 2560×1600 的体感（默认参数调校）
+- [ ] 拖拽 × 穿透 × 投掷三方交互（dragging 标志、排他租约、拖动结束 reissue 的咬合）
+- [ ] 弹跳移动中穿透命中判定是否跟得上（bodyRect 快照推送频率 vs 250ms 轮询；不行则命中余量跟随速度）
+- [ ] 启停即时生效；回归：壳层用例 + petween 1044 基线 + physics 上游测试全绿
+
+### 风险预置
+
+- physics 帧循环期间命中区域滞后（见 8D 第三条，预案：速度感知的命中余量）
+- 双 submodule 的构建链复杂度（electeron-vite externals/alias 处理两份，模式可复制）
+- petween-physics 0.2.0 对 petween 版本的兼容窗口（开工首日验证）
+
 ## 待用户拍板项
 
 - [ ] GitHub 仓库名 / appId（`com.traveritas.petween`?）与 publish 目标仓库
