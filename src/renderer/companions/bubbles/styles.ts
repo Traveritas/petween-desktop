@@ -29,7 +29,7 @@ export interface BubbleStyle {
 
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, ms) / 1000
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`
+  if (totalSeconds < 60) return `${Math.floor(totalSeconds)}s`
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = Math.floor(totalSeconds % 60)
   if (minutes < 60) return `${minutes}:${String(seconds).padStart(2, '0')}`
