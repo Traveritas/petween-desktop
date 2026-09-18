@@ -218,6 +218,29 @@
 
 本地 loopback API 无鉴权是**接受的设计边界**：任意本地进程本就能直接读写同用户权限的文件与注册表（含同一 HKCU Run 键），API 未提供越权能力；自启开关只能切换 Petween 自身（path/args 硬编码）。浏览器页攻击面已由跨源写栅栏 + 无 CORS 头 + 随机端口覆盖。若未来连接器引入真正特权动作，再考虑 token 化。
 
+## 2026-09-18 本地发布构建 + prod 双 React P0 修复
+
+用户要求先不接 electron-updater/publish，出一个能跑的本地构建自用。构建过程发现并修复一个 **P0（prod 独有）**：
+
+### P0：prod 渲染包双 React，overlay 从未挂载
+
+- **现象**：打包版 overlay 窗口 `#root` 恒空、零 `/api/petween/config` 轮询、控制台 `TypeError: Cannot read properties of null (reading 'useState')`（`react_production_min.useState` ← PetOverlay）。设置页碰巧免疫（壳层自有 react 单副本）。
+- **根因**：`vendor/petween` 是独立 pnpm 项目（自己的 node_modules），其源码的裸 `react` import 在 **rollup 构建下**解析到 submodule 的第二份物理 react；壳层入口解析根 node_modules 的 react + react-dom → 产物含两份 React，hooks 调度器分裂。dev 服务器按优化根图解析，两路合一，所以 Phase 2~7 真机验收全部正常、打包后才炸。
+- **修复**：`electron.vite.config.ts` renderer `resolve.dedupe: ['react', 'react-dom']`，强制统一从本仓库根解析。修复后 `react_production_min` 标记只在共享 chunk 出现一次，overlay 入口 chunk 由 184KB 缩至 172KB。
+- **验证链**（全部在打包 exe 上）：CDP（`--remote-debugging-port`）确认 root 挂载、精灵图解码（natural 1254×1254）、config 轮询存活、API 移动位置后 `inset` 跟随；**DPI-aware 像素差分**确认屏幕级可见（`enabled:false` 开关使精灵区域精确消失，21k 像素簇）；二次实例唤起设置窗五分区 + 编辑器 iframe 正常。typecheck + 89 用例全绿。
+
+### 教训（构建验证方法论）
+
+1. **prod 渲染产物必须单独验证挂载**——dev 正常不证明打包正常（依赖解析路径不同）。后续增强清单的「Playwright 冒烟」正是为此。
+2. GDI `CopyFromScreen` 截图在 DPI-unaware 进程里拿到的是缩放副本，且**抓不到 layered 透明窗内容**——对 overlay 做像素验证必须先 `SetProcessDPIAware()`。
+3. electron-builder 下载（Electron zip 等）不走系统代理，需 `HTTPS_PROXY=http://127.0.0.1:7897 pnpm run dist:win`（Clash 混合端口）。
+
+### 产物
+
+- `dist/Petween Setup 0.1.0.exe`（NSIS 安装器，未签名 → SmartScreen「更多信息→仍要运行」）
+- `dist/win-unpacked/Petween.exe`（便携版）
+- 无 updater/publish（按用户要求）；数据目录与 dev 共享 `userData/petween-home/`，dev 与打包版受单实例锁互斥。
+
 ## 待用户拍板项
 
 - [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）

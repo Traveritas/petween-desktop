@@ -48,6 +48,15 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
       alias: { petween: petweenSrc, 'petween-physics': physicsSrc },
+      // vendor/petween is a separate pnpm project with its own node_modules,
+      // so its source's bare `react` imports resolve to a second physical
+      // copy. Without dedupe the prod bundle carries two Reacts and every
+      // petween component dies on mount ("Cannot read properties of null
+      // (reading 'useState')" — react-dom of copy A drives copy B's hooks).
+      // Dev never hit this because the dev server resolves dep imports from
+      // the optimized root graph, but rollup keeps both paths. Always resolve
+      // react from THIS project's node_modules.
+      dedupe: ['react', 'react-dom'],
     },
     server: {
       proxy: {

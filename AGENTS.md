@@ -44,6 +44,7 @@ petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 +
 8. **不 import `vendor/petween/src/client/index.ts`**（那是 DSH slot 注册）；overlay 入口自己 mount `PetOverlay`（纯组件）。设置页直接用 host 伺服的 `/petween-editor/`（`lib/editor.js` 自包含 IIFE）。
 9. **main 薄壳化**：Electron API 调用收敛到少数模块，业务逻辑纯函数化，vitest node 环境 + `vi.mock('electron')` 直测；渲染栈沿用 petween 既有 jsdom + mocked `element.animate` 模式。单元测试绝不启动 Electron。
 10. 已知前置坑：`vendor/petween` 的 node_modules 符号链接因历史目录搬迁**已断**，联调前必须先在 submodule 内 `pnpm install`；编辑器页面依赖 submodule 内 `pnpm run build` 产出的 `lib/editor.js`。
+11. **prod 渲染包必须 `resolve.dedupe: ['react','react-dom']`**（已写入 electron.vite.config.ts）：submodule 自带第二份物理 react，rollup 会打进两份 → overlay 挂载即死于 `useState of null`（dev 解析合一所以测不出）。prod 渲染产物改完后务必验证挂载（CDP `--remote-debugging-port` 或后续 Playwright 冒烟）；对透明 overlay 做像素验证的截图进程必须先 `SetProcessDPIAware()`——DPI-unaware 的 GDI 缩放副本抓不到 layered 窗内容。
 
 ## 5. 构建与运行
 
@@ -56,7 +57,7 @@ pnpm test                                                                # 壳�
 pnpm dist:win                                                            # petween 构建 → 三段构建 → NSIS+便携版
 ```
 
-注意：pnpm 10 拦截依赖构建脚本，`pnpm.onlyBuiltDependencies`（electron/esbuild）已写入 package.json；Electron 二进制缺失时跑 `node node_modules/electron/install.js`。
+注意：pnpm 10 拦截依赖构建脚本，`pnpm.onlyBuiltDependencies`（electron/esbuild）已写入 package.json；Electron 二进制缺失时跑 `node node_modules/electron/install.js`；electron-builder 下载（Electron zip 等）不走系统代理，需 `HTTPS_PROXY=http://127.0.0.1:7897 pnpm run dist:win`（Clash 混合端口）。
 
 ## 6. 当前状态
 
@@ -75,6 +76,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-16（晚）：DSH 真机联测通过（Phase 4 验收关闭）；`dsh web` 断链修复**（profile `link:` 路径与 petween node_modules 均因仓库搬迁悬空，均已修复）；**always-interactive 模式整体移除**（用户拍板：整屏吃鼠标、与救援热键瞬时锁定重叠；残留值归一化为 auto）。
 - **2026-09-16（夜）：v0.1.0 里程碑**——五路子智能体综合评审（主进程/渲染层/测试/文档/安全），零 P0、4 个 P1 + 一批 P2 当场修复（打包排除、设置持久化竞态与 flushSync、启动兜底、minWidth 算术、PUT 竞态、跨源写栅栏、测试盲区补齐），89 用例全绿后打标签；评审记录与 backlog 见 docs/05「v0.1.0 里程碑评审」。
 - 待办与后续增强入口 = docs/05「后续增强」清单、「v0.1.0 里程碑评审 backlog」与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）。~~发版前必做：builder 排除~~（✅ 评审时已修）。
+- **2026-09-18：本地发布构建 + prod 双 React P0 修复**：dist 链走通（NSIS+便携版，按用户要求不接 updater/publish）；修复 prod 渲染包双 React（`resolve.dedupe`，dev 测不出的坑，详见 docs/05「2026-09-18」节）；打包版全链路验证（CDP 挂载/精灵图/轮询 + DPI-aware 像素显隐差分 + 设置窗五分区）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则
