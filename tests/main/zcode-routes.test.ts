@@ -92,6 +92,65 @@ describe('event sink', () => {
   })
 })
 
+describe('event sink payload bodies (Phase 10, docs/06 §8)', () => {
+  const spikeShape = {
+    sessionId: 'sess_abcd-1234',
+    session_id: 'sess_abcd-1234',
+    hookEventName: 'PreToolUse',
+    toolName: 'Edit',
+    tool_name: 'Edit',
+    toolInput: { file_path: 'D:/x/a.ts', old_string: 'a\nb', new_string: 'a\nB\nc' },
+    tool_input: { file_path: 'D:/x/a.ts', old_string: 'a\nb', new_string: 'a\nB\nc' },
+    timestamp: '2026-09-18T15:27:18.165Z',
+    turnId: 'turn_1',
+  }
+
+  it('parses the stdin JSON body and forwards the payload', async () => {
+    const res = await fetch(`${base}${EVENT}?e=pre-tool-edit`, {
+      method: 'POST',
+      body: JSON.stringify(spikeShape),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.status).toBe(204)
+    expect(onHookEvent).toHaveBeenCalledWith({
+      kind: 'pre-tool-edit',
+      sessionId: 'sess_abcd-1234',
+      payload: {
+        toolName: 'Edit',
+        toolInput: spikeShape.tool_input,
+        turnId: 'turn_1',
+        at: Date.parse('2026-09-18T15:27:18.165Z'),
+      },
+    })
+  })
+
+  it('strips a trailing &session= pair (transitional install mixing urlencode with data-binary)', async () => {
+    const body = `${JSON.stringify(spikeShape)}&session=sess_abcd-1234`
+    const res = await fetch(`${base}${EVENT}?e=post-tool`, { method: 'POST', body })
+    expect(res.status).toBe(204)
+    expect(onHookEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'post-tool', sessionId: 'sess_abcd-1234', payload: expect.anything() }),
+    )
+  })
+
+  it('malformed JSON is rejected (no usable session id)', async () => {
+    const res = await fetch(`${base}${EVENT}?e=stop`, { method: 'POST', body: '{"broken":' })
+    expect(res.status).toBe(400)
+    expect(onHookEvent).not.toHaveBeenCalled()
+  })
+
+  it('JSON without any session id field is rejected', async () => {
+    const res = await fetch(`${base}${EVENT}?e=stop`, { method: 'POST', body: '{"toolName":"Bash"}' })
+    expect(res.status).toBe(400)
+  })
+
+  it('bodies over 1 MB are rejected', async () => {
+    const huge = `{"session_id":"sess_x","pad":"${'x'.repeat(1100 * 1024)}"}`
+    const res = await fetch(`${base}${EVENT}?e=stop`, { method: 'POST', body: huge })
+    expect(res.status).toBe(413)
+  })
+})
+
 describe('status and actions', () => {
   it('status returns the connector snapshot', async () => {
     const res = await fetch(`${base}/api/petween-desktop/connector/zcode/status`)

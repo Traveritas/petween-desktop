@@ -4,8 +4,10 @@
  * one registerCompanion() line here (the physics entry below is the pattern).
  */
 import { createPhysicsDesktopCompanion } from 'petween-physics/desktop'
+import { createStatsHudCompanion } from './stats-hud/companion'
 import { registerCompanion } from './registry'
 
 registerCompanion(createPhysicsDesktopCompanion())
+registerCompanion(createStatsHudCompanion())
 
 export { listCompanions, mountEnabledCompanions } from './registry'

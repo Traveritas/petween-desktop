@@ -31,9 +31,13 @@ export interface DesktopSettings {
   /**
    * Companion enable map (docs/05 Phase 8): absent id = enabled, explicit
    * false disables. The compile-time registry provides ids/display names.
+   * `options` is a per-companion bag the shell stores verbatim — each
+   * companion validates its own keys (Phase 10: the stats HUD's style /
+   * animation picks live here).
    */
   companions: {
     enabled: Record<string, boolean>
+    options: Record<string, Record<string, unknown>>
   }
   /**
    * Agent connectors beyond DSH (docs/06): the zcode hooks listener. `enabled`
@@ -65,6 +69,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   },
   companions: {
     enabled: {},
+    options: {},
   },
   connectors: {
     zcode: {
@@ -102,6 +107,13 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
   for (const [id, value] of Object.entries(enabled)) {
     if (typeof value === 'boolean') enabledMap[id] = value
   }
+  const rawOptions = (typeof companions.options === 'object' && companions.options !== null ? companions.options : {}) as Record<string, unknown>
+  const optionsMap: Record<string, Record<string, unknown>> = {}
+  for (const [id, value] of Object.entries(rawOptions)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      optionsMap[id] = value as Record<string, unknown>
+    }
+  }
   const connectors = (typeof raw.connectors === 'object' && raw.connectors !== null ? raw.connectors : {}) as Record<string, unknown>
   const zcode = (typeof connectors.zcode === 'object' && connectors.zcode !== null ? connectors.zcode : {}) as Record<string, unknown>
   const mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
@@ -119,7 +131,7 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
       enabled: typeof dsh.enabled === 'boolean' ? dsh.enabled : true,
       port: clampNumber(dsh.port, PORT_MIN, PORT_MAX, DEFAULT_DESKTOP_SETTINGS.dsh.port),
     },
-    companions: { enabled: enabledMap },
+    companions: { enabled: enabledMap, options: optionsMap },
     connectors: {
       zcode: {
         enabled: typeof zcode.enabled === 'boolean' ? zcode.enabled : true,
@@ -205,6 +217,12 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
         companions: {
           ...(settings.companions as unknown as Record<string, unknown>),
           ...((patch as { companions?: Record<string, unknown> })?.companions ?? {}),
+          // options merges per companion id: patching one companion's bag
+          // must not drop another companion's (physics, stats HUD, …).
+          options: {
+            ...(settings.companions.options as unknown as Record<string, unknown>),
+            ...((patch as { companions?: { options?: Record<string, unknown> } })?.companions?.options ?? {}),
+          },
         },
         connectors: {
           ...(settings.connectors as unknown as Record<string, unknown>),

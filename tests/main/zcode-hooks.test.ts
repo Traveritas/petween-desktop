@@ -71,7 +71,7 @@ describe('cfg rendering', () => {
 })
 
 describe('buildZcodeHookEvents', () => {
-  it('uses process-type curl hooks with the cfg path and session template var', () => {
+  it('uses process-type curl hooks with the cfg path and stdin forwarding', () => {
     const events = buildZcodeHookEvents(CFG_DIR)
     const pre = events.PreToolUse
     expect(pre).toHaveLength(3)
@@ -84,8 +84,10 @@ describe('buildZcodeHookEvents', () => {
       const args = hook.args as string[]
       expect(args[0]).toBe('--config')
       expect(args[1].startsWith(`${CFG_DIR}/`)).toBe(true)
-      expect(args[2]).toBe('--data-urlencode')
-      expect(args[3]).toBe('session=${CLAUDE_SESSION_ID}')
+      // Phase 10: the hook body is zcode's stdin JSON forwarded verbatim —
+      // session id and tool payload come from the JSON (docs/06 §8).
+      expect(args[2]).toBe('--data-binary')
+      expect(args[3]).toBe('@-')
     }
   })
 

@@ -14,6 +14,8 @@ import { join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { DEV_LOCAL_PORT } from './dev-port'
 import { createZcodeConnector } from './connectors/zcode-connector'
+import { createStatsLedger } from './connectors/stats-ledger'
+import { registerStatsRoutes } from './connectors/stats-routes'
 import {
   installZcodeHooks,
   uninstallZcodeHooks,
@@ -202,6 +204,9 @@ async function bootstrap(): Promise<void> {
   // zcode connector (docs/06): hooks POST into this local-server; the curl
   // cfg files carry the current random port so hook registrations stay valid
   // across boots. Disabled in settings = events dropped at the sink.
+  // Phase 10: the stats ledger (thinking time + edit line counts) sits behind
+  // the connector and serves the HUD companion via /api/petween-desktop/stats.
+  const statsLedger = createStatsLedger({ now: () => Date.now() })
   const zcodePaths: ZcodeHooksPaths = {
     cfgDir: join(app.getPath('userData'), 'zcode-hooks'),
     zcodeConfigPath: join(homedir(), '.zcode', 'cli', 'config.json'),
@@ -210,8 +215,10 @@ async function bootstrap(): Promise<void> {
     relay: server.relay,
     now: () => Date.now(),
     isFollowEnabled: () => settingsStore?.get().connectors.zcode.followLatestUser ?? false,
+    stats: statsLedger,
     log: (message) => console.log(message),
   })
+  registerStatsRoutes({ webServer: server.webServer }, { snapshot: (since) => statsLedger.snapshot(since) })
   const zcodeEnabled = (): boolean => settingsStore?.get().connectors.zcode.enabled ?? true
   const syncZcodeCfgFiles = (): Promise<void> => {
     if (!zcodeEnabled() || server === null) return Promise.resolve()

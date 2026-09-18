@@ -275,6 +275,33 @@
 
 error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 success）；应用未运行时每次工具调用在 zcode 日志留一条 curl failed 记录（不阻塞，exit≠2）；matcher 锚定语义与 Stop-错误回合行为待真机确认。
 
+## Phase 10：统计泡泡 HUD（思考用时 / 编辑行数）（2026-09-18 代码完成；真机验收待用户重装 hooks + 重启 zcode）
+
+用户需求：文件写入弹「行数泡泡」（写入过程实时累加，完成后淡出）；思考弹「用时泡泡」（计时实时跳动，思考结束淡出）；样式与动画可扩展；先单会话，多会话排布与完成提醒后置。对话泡泡（带模型回复文本）**拍板为独立插件**——数据通道不同（hooks 拿不到回复文本，可靠来源只有 transcript 尾读）、生命周期不同；共享本次做的 BubbleHost 基础设施。
+
+### 设计定案（评估轮拍板）
+
+1. **数据走旁路不走状态信封**：连接器侧共享 stats 账本（`recordState`/`recordEdit` 两类规范化事实），HUD 轮询 `GET /api/petween-desktop/stats?since=<seq>`；petween 依旧零改动。账本连接器无关——Claude Code 连接器平移、DSH 桥后续从 `tool/call` arguments 喂同一账本。
+2. **hook stdin 转发**：args 改 `--data-binary @-`，端点双格式解析（旧 urlencoded 兼容）。stdin JSON 双命名（camel+snake）spike 实证（docs/06 §8.1），PreToolUse 即带 `toolInput`（行数写入开始时可算），`turnId`/zcode `timestamp` 白捡。
+3. **翻译层不设开关**：语义无偏好空间，且开关绑定 hook 注册形态（翻转=重装+重启）；hud 关闭靠 companion 开关，账本常驻（每事件毫秒级 + 每会话几十字节）。
+4. **隐私不变量**：编辑内容在 HTTP 边界归约为行数，账本只存整数与 id。
+
+### 实现
+
+- main：`line-count.ts`（LCS 行 diff/补丁/多编辑，1M cell 兜底）、`stats-ledger.ts`（思考区间累加——waiting 打断不计、行数总计、256 容量 seq 环、焦点=显式 focus>最近活跃）、`stats-routes.ts`；连接器在 **follow 门控之前**记账（后台会话照常记账不发射）、focus 随发射会话、watchdog dispose 同步清账本行；hook args/端点双格式（docs/06 §8）。
+- renderer：`companions/bubbles/`（BubbleHost——宠物 bodyRect 上方堆叠列、满则下方翻转+视口钳制、pointer-events:none 不碰穿透；样式注册表内置玻璃/终端/浅色三种，`registerBubbleStyle` 可扩展；动画预设弹出/升起/淡入/坠落四种）+ `companions/stats-hud/`（`hud-logic.ts` 纯 reducer：思考 1.5s 阈值防闪、编辑按 working 片段聚泡实时累加、离场 hold 后淡出、20s 硬上限、焦点切换立即隐藏；companion 轮询 stats 400ms/设置 3s，计时本地 250ms 跳动）。
+- 设置：`companions.options['stats-hud']`（样式/动画/阈值，per-companion options 包合并不丢兄弟插件）；设置卡在「插件」分区。
+
+### 验收
+
+- [x] 单测 186 用例全绿（line-count/stats-ledger/stats-routes/端点载荷/连接器记账接线/hud-logic 全覆盖）+ typecheck
+- [ ] 真机：设置→连接→zcode「重装 hooks」→**重启 zcode 客户端**（hooks 启动时读）→ 跑一次编辑任务，观察泡泡（思考计时/行数累加/淡出/样式切换）
+- [ ] 旧格式 hooks（未重装）期间一切照旧（宠物联动不断，只是无泡泡）
+
+### 后置项（重开触发器）
+
+多会话泡泡动态排布（多列/避让策略）、完成提醒泡泡、对话泡泡（独立 companion，复用 BubbleHost；数据走 transcript 尾读）、里程碑触发宠物本体动画（`playAnimation` 接口已通）。
+
 ## 待用户拍板项
 
 - [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）

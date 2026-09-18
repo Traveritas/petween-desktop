@@ -1,0 +1,256 @@
+/**
+ * hud-logic: the pure bubble state machine (Phase 10). Every timing policy
+ * is exercised here — threshold gating, episode accumulation across polls,
+ * hide-on-leave with holds, focus switching, and the age cap. No DOM.
+ */
+import { describe, expect, it } from 'vitest'
+import {
+  createHudReducer,
+  DEFAULT_HUD_OPTIONS,
+  type HudCommand,
+} from '../../src/renderer/companions/stats-hud/hud-logic'
+import type { StatsLedgerEvent, StatsSnapshot, StatsSessionSummary } from '../../src/main/connectors/stats-ledger'
+
+const T0 = 1_000_000
+
+const session = (overrides: Partial<StatsSessionSummary>): StatsSessionSummary => ({
+  state: 'idle',
+  thinkingMs: 0,
+  thinkingSince: null,
+  linesAdded: 0,
+  linesRemoved: 0,
+  edits: 0,
+  lastAt: T0,
+  ...overrides,
+})
+
+const stateEvent = (seq: number, at: number, state: StatsSessionSummary['state'], sessionId = 's1'): StatsLedgerEvent => ({
+  seq,
+  at,
+  sessionId,
+  type: 'state',
+  state,
+})
+
+const editEvent = (
+  seq: number,
+  at: number,
+  added: number,
+  removed: number,
+  sessionId = 's1',
+): StatsLedgerEvent => ({ seq, at, sessionId, type: 'edit', tool: 'edit', added, removed })
+
+const snapshot = (parts: {
+  cursor: number
+  focusedSessionId: string | null
+  sessions: Record<string, StatsSessionSummary>
+  events?: StatsLedgerEvent[]
+}): StatsSnapshot => ({ events: [], ...parts })
+
+const types = (commands: HudCommand[]): string[] => commands.map((command) => command.type)
+
+describe('thinking bubble', () => {
+  it('shows once the threshold is crossed (live reconciliation path)', () => {
+    const reducer = createHudReducer()
+    const commands = reducer.apply(
+      snapshot({ cursor: 1, focusedSessionId: 's1', sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) } }),
+      T0 + DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs + 100,
+    )
+    expect(commands).toEqual([{ type: 'thinking-show', sessionId: 's1', startedAt: T0 }])
+  })
+
+  it('below the threshold nothing shows, and a later leave is silent', () => {
+    const reducer = createHudReducer()
+    const first = reducer.apply(
+      snapshot({ cursor: 2, focusedSessionId: 's1', sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) } }),
+      T0 + 500,
+    )
+    expect(first).toEqual([])
+    const second = reducer.apply(
+      snapshot({
+        cursor: 3,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [stateEvent(3, T0 + 900, 'working')],
+      }),
+      T0 + 1000,
+    )
+    expect(second).toEqual([])
+  })
+
+  it('hides with the interval total and hold when thinking ends while shown', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({ cursor: 1, focusedSessionId: 's1', sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) } }),
+      T0 + 4000,
+    )
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 2,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [stateEvent(2, T0 + 4500, 'working')],
+      }),
+      T0 + 4600,
+    )
+    expect(commands).toEqual([
+      { type: 'thinking-hide', sessionId: 's1', totalMs: 4500, holdMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs },
+    ])
+  })
+})
+
+describe('edit bubble episodes', () => {
+  it('spawns on the first edit, accumulates live, hides on leaving working', () => {
+    const reducer = createHudReducer()
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 4,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(2, T0 + 10, 3, 1), editEvent(3, T0 + 20, 5, 2), stateEvent(4, T0 + 30, 'thinking')],
+      }),
+      T0 + 100,
+    )
+    expect(commands).toEqual([
+      { type: 'edit-show', sessionId: 's1', added: 3, removed: 1, files: 1 },
+      { type: 'edit-update', sessionId: 's1', added: 8, removed: 3, files: 2 },
+      { type: 'edit-hide', sessionId: 's1', holdMs: DEFAULT_HUD_OPTIONS.editHoldMs, maxAgeReached: false },
+    ])
+  })
+
+  it('accumulates across polls (real-time updating bubble)', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 4, 0)],
+      }),
+      T0 + 50,
+    )
+    const second = reducer.apply(
+      snapshot({
+        cursor: 2,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(2, T0 + 400, 6, 2)],
+      }),
+      T0 + 500,
+    )
+    expect(second).toEqual([{ type: 'edit-update', sessionId: 's1', added: 10, removed: 2, files: 2 }])
+  })
+
+  it('a new episode after a hide spawns a fresh bubble (counts restart)', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({
+        cursor: 2,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 4, 0), stateEvent(2, T0 + 100, 'thinking')],
+      }),
+      T0 + 150,
+    )
+    const second = reducer.apply(
+      snapshot({
+        cursor: 4,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [stateEvent(3, T0 + 200, 'working'), editEvent(4, T0 + 300, 1, 1)],
+      }),
+      T0 + 350,
+    )
+    expect(types(second)).toEqual(['edit-show'])
+    expect(second[0]).toMatchObject({ added: 1, removed: 1, files: 1 })
+  })
+
+  it('unknown counts still bubble (null values pass through)', () => {
+    const reducer = createHudReducer()
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [{ seq: 1, at: T0, sessionId: 's1', type: 'edit', tool: 'edit', added: null, removed: null }],
+      }),
+      T0 + 10,
+    )
+    expect(commands).toEqual([{ type: 'edit-show', sessionId: 's1', added: null, removed: null, files: 1 }])
+  })
+
+  it('enforces the age cap on runaway working episodes', () => {
+    const reducer = createHudReducer({ editMaxAgeMs: 5000 })
+    reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 2, 0)],
+      }),
+      T0 + 100,
+    )
+    const later = reducer.apply(
+      snapshot({ cursor: 1, focusedSessionId: 's1', sessions: { s1: session({ state: 'working' }) } }),
+      T0 + 6000,
+    )
+    expect(later).toEqual([{ type: 'edit-hide', sessionId: 's1', holdMs: 0, maxAgeReached: true }])
+  })
+})
+
+describe('focus scoping (v1 single session)', () => {
+  it('ignores non-focused sessions entirely', () => {
+    const reducer = createHudReducer()
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 3,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }), s2: session({ state: 'thinking', thinkingSince: T0 - 9999 }) },
+        events: [editEvent(2, T0, 9, 9, 's2'), stateEvent(3, T0, 'thinking', 's2')],
+      }),
+      T0 + 10_000,
+    )
+    expect(commands).toEqual([])
+  })
+
+  it('a focus switch immediately hides the previous focus bubbles (thinking live)', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) },
+      }),
+      T0 + 5000,
+    )
+    const switched = reducer.apply(
+      snapshot({ cursor: 2, focusedSessionId: 's2', sessions: { s2: session({ state: 'idle' }) } }),
+      T0 + 5100,
+    )
+    expect(switched).toEqual([{ type: 'thinking-hide', sessionId: 's1', totalMs: 0, holdMs: 0 }])
+  })
+
+  it('a focus switch immediately hides the previous focus bubbles (edit episode live)', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 3, 1)],
+      }),
+      T0 + 100,
+    )
+    const switched = reducer.apply(
+      snapshot({ cursor: 2, focusedSessionId: 's2', sessions: { s2: session({ state: 'idle' }) } }),
+      T0 + 200,
+    )
+    expect(switched).toEqual([{ type: 'edit-hide', sessionId: 's1', holdMs: 0, maxAgeReached: false }])
+  })
+
+  it('null focus produces no commands', () => {
+    const reducer = createHudReducer()
+    const commands = reducer.apply(snapshot({ cursor: 0, focusedSessionId: null, sessions: {} }), T0)
+    expect(commands).toEqual([])
+  })
+})

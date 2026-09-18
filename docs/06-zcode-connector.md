@@ -131,3 +131,46 @@ zcode hooks ──(进程内联执行)──► curl.exe ──POST──► loc
    可分辨）。
 4. 子智能体会话独立 sessionId，直接作为独立 session 进 aggregate——预期行为，
    真机确认无异常闪动即可。
+
+## 8. hook stdin 载荷通道（Phase 10，2026-09-18 spike 实证 + 落地）
+
+思考用时/编辑行数（统计泡泡 HUD）需要 hook 载荷。spike 方法：临时给已装
+hook 的 cfg 加 `data-binary = "@-"` + `trace-ascii`（cfg 内容每次点火时读，
+不需重启客户端），本会话触发一次 Edit 自观察。
+
+### 8.1 stdin JSON 形状（实测）
+
+同一对象上**双命名并存**——zcode 原生 camelCase + Claude Code 兼容
+snake_case：`sessionId`/`session_id`、`toolName`/`tool_name`、
+`toolInput`/`tool_input`、`toolResponse`/`tool_response`（PostToolUse，含
+stdout/exitCode 等结果）、`timestamp`（ISO，zcode 自己的事件时间）、
+`turnId`（回合关联，白捡）、`transcriptPath`、`cwd`、`hookEventName`。
+PreToolUse 就带 `toolInput`（Edit 的 old/new_string、Write 的 content）——
+**行数在写入开始时即可算**，post-tool 只当完成信号。读取顺序 snake 优先、
+camel 兜底（`countEditLines` 同时服务将来的 Claude Code 连接器）。
+
+### 8.2 传输与解析
+
+- hook args：`--config <cfg> --data-binary @-`（stdin 原样 POST；不再
+  `--data-urlencode session=`，session 从 JSON 取）。**需重装 hooks + 重启
+  zcode 客户端生效**；旧格式安装继续工作（无载荷，只有状态事件）。
+- 端点双格式：body 以 `{` 开头 → JSON（容忍尾部 `&session=`——过渡期混装时
+  curl 会拼接）；否则旧 urlencoded 路径。上限 1MB（Write 可带整个文件）。
+- **隐私不变量**：编辑内容在 HTTP 边界即归约为行数（`line-count.ts`），
+  账本只存整数与 id，不落盘、不过 stats 路由。filePath 仅作显示元数据保留。
+
+### 8.3 stats 账本（连接器无关）
+
+`stats-ledger.ts`：连接器把原生事件翻译成两类规范化事实——状态转换
+（`recordState`）+ 编辑事实（`recordEdit`），账本负责思考区间累加
+（waiting 打断不计）、行数总计、seq 环形事件流（容量 256，HUD 增量拉取）
+与焦点会话（显式 focus > 最近活跃）。**记账在 follow 门控之前**：后台会话
+照常记账（与 watchdog 记账同语义）。Claude Code 连接器将来平移此层；
+DSH 桥的 `tool/call` arguments 本就带载荷，后续可从桥侧喂同一账本。
+
+### 8.4 新增端点与模块
+
+- `GET /api/petween-desktop/stats?since=<seq>`（只读，无写栅栏）。
+- `line-count.ts`（纯函数：LCS 行 diff + 补丁/多编辑解析 + 1M cell 兜底）、
+  `stats-ledger.ts`、`stats-routes.ts`；渲染层 `companions/bubbles/`
+  （BubbleHost/样式/动画注册表）+ `companions/stats-hud/`。

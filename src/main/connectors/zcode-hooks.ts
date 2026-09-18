@@ -8,9 +8,12 @@
  * their args, so reinstall is idempotent and uninstall is a precise filter.
  * A corrupt config file is user data — install fails instead of clobbering.
  *
- * Pure Node; all paths injected. No hook ever parses stdin: the event kind is
- * encoded in the cfg URL, the session id travels as --data-urlencode with the
- * ${CLAUDE_SESSION_ID} template variable zcode expands (and injects as env).
+ * Pure Node; all paths injected. The event kind is encoded in the cfg URL.
+ * Since Phase 10 the hook body is zcode's stdin JSON forwarded verbatim
+ * (`--data-binary @-`): the session id and tool payload come from the JSON
+ * (session_id/tool_input, spike-verified 2026-09-18 — docs/06 §8). Hook
+ * registrations carrying the older `--data-urlencode` args keep working
+ * (the endpoint parses both body shapes) but deliver no payload.
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -74,12 +77,12 @@ export async function writeZcodeHookConfigs(cfgDir: string, port: number): Promi
 type HookEntry = { type?: string; command?: string; args?: unknown; timeoutMs?: number }
 type MatcherGroup = { matcher?: string; hooks?: HookEntry[] }
 
-/** One process-type hook invocation of curl with the cfg file + session id. */
+/** One process-type hook invocation of curl with the cfg file + stdin body. */
 function hookFor(cfgDir: string, kind: ZcodeHookKind): HookEntry {
   return {
     type: 'process',
     command: 'curl.exe',
-    args: [`--config`, `${normalizeCfgPath(cfgDir)}/${cfgFileName(kind)}`, `--data-urlencode`, `session=\${CLAUDE_SESSION_ID}`],
+    args: [`--config`, `${normalizeCfgPath(cfgDir)}/${cfgFileName(kind)}`, `--data-binary`, `@-`],
     timeoutMs: 2500,
   }
 }

@@ -10,12 +10,12 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { ZCODE_HOOK_KINDS, type ZcodeConnectorStatus, type ZcodeHookKind } from './zcode-connector'
+import { ZCODE_HOOK_KINDS, type ZcodeConnectorStatus, type ZcodeHookKind, type ZcodeHookPayload } from './zcode-connector'
 
 export interface ZcodeConnectorRoutesDeps {
   /** False when the connector is disabled in settings — events are dropped. */
   isEnabled(): boolean
-  onHookEvent(input: { kind: ZcodeHookKind; sessionId: string }): void
+  onHookEvent(input: { kind: ZcodeHookKind; sessionId: string; payload?: ZcodeHookPayload }): void
   /** Async: the hooksInstalled flag reads the zcode config file. */
   connectorStatus(): Promise<ZcodeConnectorStatus & { enabled: boolean; hooksInstalled: boolean }>
   installHooks(): Promise<void>
@@ -23,6 +23,13 @@ export interface ZcodeConnectorRoutesDeps {
 }
 
 const SESSION_MAX_CHARS = 200
+
+/**
+ * Phase 10 bodies are the hook's stdin JSON (Write/Edit payloads can carry a
+ * whole file); the legacy scalar body stays tiny. 1 MB bounds a runaway
+ * payload while covering any realistic file content (docs/06 §8).
+ */
+const EVENT_BODY_LIMIT_BYTES = 1024 * 1024
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   if (res.destroyed || res.writableEnded) return
@@ -73,6 +80,51 @@ function readBody(req: IncomingMessage, limitBytes: number): Promise<string> {
   })
 }
 
+/**
+ * Both body generations (docs/06 §8): Phase 10 hooks POST the stdin JSON
+ * verbatim; legacy hooks POST `session=<id>`. A JSON body may carry a
+ * trailing `&session=...` (curl concatenates when a transitional install
+ * mixes --data-urlencode with --data-binary) — strip it before parsing.
+ * Returns null session when nothing usable is found (→ 400 upstream).
+ */
+export function parseHookBody(body: string): { sessionId: string; payload?: ZcodeHookPayload } {
+  const trimmed = body.trimStart()
+  if (trimmed.startsWith('{')) {
+    const jsonStart = body.indexOf('{')
+    const stripped = body.replace(/&session=[^&]*$/, '')
+    try {
+      const parsed = JSON.parse(stripped.slice(jsonStart)) as Record<string, unknown>
+      const sessionId = pickString(parsed.session_id, parsed.sessionId)
+      if (sessionId === null) return { sessionId: '' }
+      const payload: ZcodeHookPayload = {}
+      const toolName = pickString(parsed.tool_name, parsed.toolName)
+      const turnId = pickString(parsed.turnId)
+      if (toolName !== null) payload.toolName = toolName
+      if (turnId !== null) payload.turnId = turnId
+      if (parsed.tool_input !== undefined) payload.toolInput = parsed.tool_input
+      else if (parsed.toolInput !== undefined) payload.toolInput = parsed.toolInput
+      const ts = parsed.timestamp
+      if (typeof ts === 'string') {
+        const at = Date.parse(ts)
+        if (Number.isFinite(at)) payload.at = at
+      } else if (typeof ts === 'number' && Number.isFinite(ts)) {
+        payload.at = ts
+      }
+      return { sessionId, payload }
+    } catch {
+      return { sessionId: '' }
+    }
+  }
+  return { sessionId: new URLSearchParams(body).get('session') ?? '' }
+}
+
+function pickString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return null
+}
+
 export function registerZcodeConnectorRoutes(
   host: { webServer: { register(route: WebRoute): () => void } },
   deps: ZcodeConnectorRoutesDeps,
@@ -115,9 +167,9 @@ export function registerZcodeConnectorRoutes(
       return
     }
     const kind = url.searchParams.get('e')
-    void readBody(req, 4 * 1024).then(
+    void readBody(req, EVENT_BODY_LIMIT_BYTES).then(
       (body) => {
-        const sessionId = new URLSearchParams(body).get('session') ?? ''
+        const { sessionId, payload } = parseHookBody(body)
         if (kind === null || !(ZCODE_HOOK_KINDS as readonly string[]).includes(kind)) {
           sendJson(res, 400, { error: { code: 'BAD_REQUEST', message: `unknown event kind ${JSON.stringify(kind)}` } })
           return
@@ -126,7 +178,7 @@ export function registerZcodeConnectorRoutes(
           sendJson(res, 400, { error: { code: 'BAD_REQUEST', message: 'invalid session id' } })
           return
         }
-        if (deps.isEnabled()) deps.onHookEvent({ kind: kind as ZcodeHookKind, sessionId })
+        if (deps.isEnabled()) deps.onHookEvent({ kind: kind as ZcodeHookKind, sessionId, ...(payload === undefined ? {} : { payload }) })
         res.writeHead(204)
         res.end()
       },
