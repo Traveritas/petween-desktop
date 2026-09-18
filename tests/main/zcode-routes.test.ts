@@ -22,6 +22,7 @@ const connectorStatus = vi.fn(async () => ({
   sessionsSeen: 0,
   lastEventAt: null,
   lastKind: null,
+  followTarget: null,
 }))
 
 const EVENT = '/api/petween-desktop/connector/zcode/event'

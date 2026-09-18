@@ -38,11 +38,15 @@ export interface DesktopSettings {
   /**
    * Agent connectors beyond DSH (docs/06): the zcode hooks listener. `enabled`
    * gates the event sink only — hook installation into the zcode config is an
-   * explicit user action from the settings card.
+   * explicit user action from the settings card. `followLatestUser` = follow
+   * mode: with several zcode sessions open, the pet tracks only the one the
+   * user last submitted a prompt in (background sessions stay bookkept but
+   * silent).
    */
   connectors: {
     zcode: {
       enabled: boolean
+      followLatestUser: boolean
     }
   }
 }
@@ -65,6 +69,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   connectors: {
     zcode: {
       enabled: true,
+      followLatestUser: false,
     },
   },
 }
@@ -118,6 +123,7 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
     connectors: {
       zcode: {
         enabled: typeof zcode.enabled === 'boolean' ? zcode.enabled : true,
+        followLatestUser: typeof zcode.followLatestUser === 'boolean' ? zcode.followLatestUser : false,
       },
     },
   }
@@ -203,6 +209,10 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
         connectors: {
           ...(settings.connectors as unknown as Record<string, unknown>),
           ...((patch as { connectors?: Record<string, unknown> })?.connectors ?? {}),
+          zcode: {
+            ...(settings.connectors.zcode as unknown as Record<string, unknown>),
+            ...((patch as { connectors?: { zcode?: Record<string, unknown> } })?.connectors?.zcode ?? {}),
+          },
         },
       }
       settings = normalizeDesktopSettings(merged)

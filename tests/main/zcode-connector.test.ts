@@ -165,3 +165,71 @@ describe('watchdogs', () => {
     expect(emissions).toHaveLength(1) // only the turn/end itself
   })
 })
+
+describe('follow mode (latest user-interacted session only)', () => {
+  const OTHER = 'sess_99999999-8888-7777-6666-555555555555'
+
+  function setupFollow(): { emissions: Emission[]; deps: ZcodeConnectorDeps; setFollow(v: boolean): void } {
+    const { relay, emissions } = fakeRelay()
+    let follow = false
+    return {
+      emissions,
+      setFollow: (v: boolean) => {
+        follow = v
+      },
+      deps: { relay, now: () => 1_000, isFollowEnabled: () => follow },
+    }
+  }
+
+  it('gates background sessions but keeps their bookkeeping for replay', () => {
+    const { emissions, deps, setFollow } = setupFollow()
+    const connector = createZcodeConnector(deps)
+    setFollow(true)
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
+    connector.handle({ kind: 'pre-tool-edit', sessionId: SESSION })
+    expect(emissions.filter((e) => e.method === 'event').length).toBeGreaterThanOrEqual(2)
+
+    connector.handle({ kind: 'pre-tool-command', sessionId: OTHER })
+    expect(emissions.some((e) => e.sessionId === OTHER)).toBe(false) // gated
+
+    // Switching focus replays OTHER's tracked visual (tool-start command).
+    connector.handle({ kind: 'user-prompt-submit', sessionId: OTHER })
+    const otherEvents = emissions.filter((e) => e.sessionId === OTHER)
+    expect(otherEvents.map((e) => e.event?.type)).toContain('tool/call')
+    expect(otherEvents.some((e) => e.method === 'status' && e.status === 'idle')).toBe(false)
+    // And retires SESSION with a rank-0 idle.
+    expect(emissions.some((e) => e.sessionId === SESSION && e.method === 'status' && e.status === 'idle')).toBe(true)
+  })
+
+  it('before the first focus signal, events pass through (aggregate until a target exists)', () => {
+    const { emissions, deps, setFollow } = setupFollow()
+    const connector = createZcodeConnector(deps)
+    setFollow(true)
+    connector.handle({ kind: 'pre-tool-other', sessionId: OTHER })
+    expect(emissions.some((e) => e.sessionId === OTHER)).toBe(true)
+  })
+
+  it('inactivating the target clears it; a focus event on the same target is emitted normally', () => {
+    const { emissions, deps, setFollow } = setupFollow()
+    const connector = createZcodeConnector(deps)
+    setFollow(true)
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
+    const prompts = emissions.filter((e) => e.method === 'event' && e.event?.type === 'assistant/chunk')
+    expect(prompts).toHaveLength(2) // no retire/replay churn on repeat focus
+
+    vi.advanceTimersByTime(1_800_000) // inactivity dispose
+    expect(connector.status().followTarget).toBeNull()
+    expect(emissions.some((e) => e.method === 'disposed' && e.sessionId === SESSION)).toBe(true)
+  })
+
+  it('turn follow off and the aggregate resumes for every session', () => {
+    const { emissions, deps, setFollow } = setupFollow()
+    const connector = createZcodeConnector(deps)
+    setFollow(true)
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
+    setFollow(false)
+    connector.handle({ kind: 'pre-tool-edit', sessionId: OTHER })
+    expect(emissions.some((e) => e.sessionId === OTHER && e.event?.type === 'tool/call')).toBe(true)
+  })
+})

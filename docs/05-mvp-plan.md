@@ -241,7 +241,7 @@
 - `dist/win-unpacked/Petween.exe`（便携版）
 - 无 updater/publish（按用户要求）；数据目录与 dev 共享 `userData/petween-home/`，dev 与打包版受单实例锁互斥。
 
-## 2026-09-18（晚）：Phase 9 zcode 连接器（代码完成；真机联测两步待用户）
+## 2026-09-18（晚）：Phase 9 zcode 连接器（✅ 真机联测通过，用户确认「功能正常」；同晚追加两项反馈处理）
 
 后续增强清单第 1 项的 zcode 分支落地（规格 = docs/06；与 2026-09-14 调研的 Claude Code 首选方案同构，zcode hooks 即 Claude Code 兼容面）。复用 `StateRelay` 缝 + 伪造 DSH 信封，**petween 零改动**，与 DSH 桥按 sessionId 天然并存。
 
@@ -261,10 +261,15 @@
 - [x] 版本 0.2.0，`dist-0.2.0/` 产出 NSIS + 便携版（旧 `dist/` 被运行中实例锁定，换目录打包）
 - [x] 真实 hooks 已安装到 `~/.zcode/cli/config.json`（指向 `%APPDATA%/petween-desktop/zcode-hooks/`）
 
-### 待用户真机联测（两步，顺序敏感）
+### 待用户真机联测（✅ 2026-09-18 用户完成并确认「功能正常」）
 
-1. 退出当前 Petween（托盘→退出），跑 `dist-0.2.0/win-unpacked/Petween.exe`（boot 时写 cfg 文件携带随机端口）
-2. 重启 zcode 客户端，随便开个会话跑任务——宠物应随 提示→思考→工具→等待授权→完成 联动；设置页 zcode 卡片应显示最近事件
+1. ~~退出当前 Petween（托盘→退出），跑 `dist-0.2.0/win-unpacked/Petween.exe`~~ ✓
+2. ~~重启 zcode 客户端看联动~~ ✓
+
+### 用户反馈追加（同晚处理，v0.2.1）
+
+1. **「只跟随最近交互的会话」模式**（多活跃会话时后台会话不干扰表情）：zcode 无窗口焦点信号，焦点代理 = 用户主动事件（`user-prompt-submit`/`session-start`）；后台会话记账不发射，焦点切换时旧目标补 idle（rank 0 退休）+ 新目标重放最后视觉。设置 `connectors.zcode.followLatestUser`（默认关）+ zcode 卡片开关；顺带修复 connectors 段 patch 只做一层合并会丢兄弟字段的隐患。详见 docs/06 §3.1。
+2. **思考/工作不换图**（DSH 端也出现过）：不是连接器 bug——petween §15.2 设计默认 `advanced.changePoseWithinActive=false`（active 内换 mode 只刷 ambient 不换 pose）。已通过 config API 把用户活配置翻转为 true（热生效，revision 67）；编辑器「高级与互动→活跃状态内切换姿势」即此开关。上游默认值是否改true 未拍板（会同时改变 DSH 端新装行为）。
 
 ### 已知边界（docs/06 §7）
 

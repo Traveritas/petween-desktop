@@ -55,6 +55,24 @@ describe('normalizeDesktopSettings', () => {
     expect(normalizeDesktopSettings({ connectors: { zcode: { enabled: 'yes' } } }).connectors.zcode.enabled).toBe(true)
     expect(normalizeDesktopSettings({ connectors: 'junk' }).connectors.zcode.enabled).toBe(true)
   })
+
+  it('followLatestUser defaults off and a zcode patch keeps the sibling field', async () => {
+    expect(DEFAULT_DESKTOP_SETTINGS.connectors.zcode.followLatestUser).toBe(false)
+    const dir = await mkdtemp(join(tmpdir(), 'petween-dsettings-'))
+    try {
+      const store = await createDesktopSettingsStore(join(dir, 's.json'))
+      store.update({ connectors: { zcode: { enabled: false } } })
+      // A followLatestUser patch must not resurrect the disabled listener.
+      const next = store.update({ connectors: { zcode: { followLatestUser: true } } })
+      expect(next.connectors.zcode).toEqual({ enabled: false, followLatestUser: true })
+      expect(normalizeDesktopSettings({ connectors: { zcode: { followLatestUser: true } } }).connectors.zcode).toEqual({
+        enabled: true,
+        followLatestUser: true,
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('createDesktopSettingsStore', () => {

@@ -42,7 +42,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 function useSettings(): {
   settings: DesktopSettings | null
-  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']>; companions: Partial<DesktopSettings['companions']>; connectors: Partial<DesktopSettings['connectors']> }>) => void
+  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']>; companions: Partial<DesktopSettings['companions']>; connectors: { zcode?: Partial<DesktopSettings['connectors']['zcode']> } }>) => void
 } {
   const [settings, setSettings] = useState<DesktopSettings | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -81,7 +81,7 @@ function useSettings(): {
       clickThrough?: Partial<DesktopSettings['clickThrough']>
       dsh?: Partial<DesktopSettings['dsh']>
       companions?: Partial<DesktopSettings['companions']>
-      connectors?: Partial<DesktopSettings['connectors']>
+      connectors?: { zcode?: Partial<DesktopSettings['connectors']['zcode']> }
     }
     if (latest.current !== null) {
       setSettings({
@@ -89,7 +89,9 @@ function useSettings(): {
         clickThrough: { ...latest.current.clickThrough, ...optimistic.clickThrough },
         dsh: { ...latest.current.dsh, ...optimistic.dsh },
         companions: { ...latest.current.companions, ...optimistic.companions },
-        connectors: { ...latest.current.connectors, ...optimistic.connectors },
+        connectors: {
+          zcode: { ...latest.current.connectors.zcode, ...optimistic.connectors?.zcode },
+        },
       })
     }
     if (timer.current !== null) clearTimeout(timer.current)
@@ -261,6 +263,12 @@ function ZcodeConnectorCard(props: { settings: DesktopSettings; patch: ReturnTyp
         hint="接收 zcode hooks 事件并驱动宠物状态（关闭后为纯监听不联动）"
         checked={enabled}
         onChange={(next) => props.patch({ connectors: { zcode: { enabled: next } } })}
+      />
+      <Toggle
+        label="只跟随最近交互的会话"
+        hint="多会话时宠物只联动你最近提交过提示（或新开/恢复）的会话；后台会话不打扰表情"
+        checked={props.settings.connectors.zcode.followLatestUser}
+        onChange={(next) => props.patch({ connectors: { zcode: { followLatestUser: next } } })}
       />
       <div className="row">
         <span className="rowText">

@@ -66,6 +66,21 @@ zcode hooks ──(进程内联执行)──► curl.exe ──POST──► loc
     「thinking/working 挂死」，如 zcode 崩溃）。长 Bash 工具远小于 30min，安全。
 - thinking/working 不设短超时（工具可合法运行很久）。
 
+### 3.1 跟随模式（followLatestUser，默认关）
+
+多 zcode 窗口并开时，§14.5 aggregate 会把所有会话搅在一起。zcode 没有窗口焦点
+信号，焦点代理 = **用户主动事件**（`user-prompt-submit` / `session-start`——只在
+用户正打字的窗口发生）。开启后：
+
+- 后台会话事件照常记账（watchdog、lastKind）但**不发射**；
+- 焦点切换到新会话时：旧目标补发一条 `agent/status idle`（rank 0 替换其在
+  aggregate 的槽位，不再压制新目标）+ 新目标**重放**其最后视觉状态（宠物立即切换，
+  不等它的下一个事件；重放用 chunk 而非 turn/start——视觉等价）；
+- 尚无任何焦点信号前事件照常透传（等价 aggregate）；目标被 30min 静默 disposed 后
+  清空，等待下一次焦点信号；关闭开关立即恢复 aggregate。
+- 已知取舍：后台会话的 `permission-request` 被门控（不弹等待表情）——它是被动信号，
+  不能当焦点用；用户切去处理时自然由该会话的后续事件接管。
+
 ## 4. 安装 / 卸载
 
 写 `~/.zcode/cli/config.json`（用户作用域）：
@@ -83,7 +98,8 @@ zcode hooks ──(进程内联执行)──► curl.exe ──POST──► loc
 ## 5. 设置与状态
 
 - `desktop-settings.json` 新增 `connectors.zcode.enabled`（监听端点启停，默认 true；
-  关闭时端点仍 204 但丢弃事件——hooks 残留也无害）。
+  关闭时端点仍 204 但丢弃事件——hooks 残留也无害）与 `connectors.zcode.followLatestUser`
+  （§3.1 跟随模式，默认 false）。
 - 设置页「连接」分区 zcode 卡片：启停开关 + 安装/移除 hooks 按钮 + 实时状态
   （hooks 是否已装、最近事件时间/种类、会话数）。
 - 端点：`POST .../connector/zcode/event`（204 恒快返回）、

@@ -209,6 +209,7 @@ async function bootstrap(): Promise<void> {
   const zcodeConnector = createZcodeConnector({
     relay: server.relay,
     now: () => Date.now(),
+    isFollowEnabled: () => settingsStore?.get().connectors.zcode.followLatestUser ?? false,
     log: (message) => console.log(message),
   })
   const zcodeEnabled = (): boolean => settingsStore?.get().connectors.zcode.enabled ?? true
