@@ -12,7 +12,7 @@ Petween 的独立桌面版：Electron 壳 + DSH 状态桥，把现有 DSH Web UI
 
 ```
 petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 + 计划）
-├── vendor/petween          ← git submodule → github.com/Traveritas/petween（锁定 b0763e1）
+├── vendor/petween          ← git submodule → github.com/Traveritas/petween（锁定 6ed667e）
 └── vendor/petween-physics  ← git submodule → github.com/Traveritas/petween-physics（锁定 0bbc914）
 ```
 
@@ -79,7 +79,7 @@ pnpm dist:win                                                            # petwe
 - 待办与后续增强入口 = docs/05「后续增强」清单、「v0.1.0 里程碑评审 backlog」与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）。~~发版前必做：builder 排除~~（✅ 评审时已修）。
 - **2026-09-18：本地发布构建 + prod 双 React P0 修复**：dist 链走通（NSIS+便携版，按用户要求不接 updater/publish）；修复 prod 渲染包双 React（`resolve.dedupe`，dev 测不出的坑，详见 docs/05「2026-09-18」节）；打包版全链路验证（CDP 挂载/精灵图/轮询 + DPI-aware 像素显隐差分 + 设置窗五分区）。
 - **2026-09-18（晚）：Phase 9 zcode 连接器完成、真机验收通过**（规格 docs/06；StateRelay 缝 + 伪造 DSH 信封，petween 零改动；curl cfg 端口发现 + 合并安装 + per-session watchdog；131 用例全绿含真实 curl 端到端冒烟；用户确认功能正常）。同晚追加：**跟随模式**（`followLatestUser`——多会话只联动最近用户主动事件过的会话，焦点代理/退休/重放见 docs/06 §3.1）；**思考/工作不换图定性为 §15.2 设计默认**（`changePoseWithinActive=false`，已翻转用户活配置，编辑器「高级与互动」有开关；上游默认值改不改待拍板）。v0.2.1 产物在 `dist-0.2.1/`。注意：zcode hooks 配置**客户端启动时读取**（运行中不热加载，spike 实证）。
-- petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）；petween-physics 基线：10 文件 / 166 用例。
+- petween 基线：55 测试文件 / 1044 用例全绿（`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则
 

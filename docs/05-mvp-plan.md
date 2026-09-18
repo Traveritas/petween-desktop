@@ -269,7 +269,7 @@
 ### 用户反馈追加（同晚处理，v0.2.1）
 
 1. **「只跟随最近交互的会话」模式**（多活跃会话时后台会话不干扰表情）：zcode 无窗口焦点信号，焦点代理 = 用户主动事件（`user-prompt-submit`/`session-start`）；后台会话记账不发射，焦点切换时旧目标补 idle（rank 0 退休）+ 新目标重放最后视觉。设置 `connectors.zcode.followLatestUser`（默认关）+ zcode 卡片开关；顺带修复 connectors 段 patch 只做一层合并会丢兄弟字段的隐患。详见 docs/06 §3.1。
-2. **思考/工作不换图**（DSH 端也出现过）：不是连接器 bug——petween §15.2 设计默认 `advanced.changePoseWithinActive=false`（active 内换 mode 只刷 ambient 不换 pose）。已通过 config API 把用户活配置翻转为 true（热生效，revision 67）；编辑器「高级与互动→活跃状态内切换姿势」即此开关。上游默认值是否改true 未拍板（会同时改变 DSH 端新装行为）。
+2. **思考/工作不换图**（DSH 端也出现过）：不是连接器 bug——petween §15.2 设计默认 `advanced.changePoseWithinActive=false`（active 内换 mode 只刷 ambient 不换 pose）。已通过 config API 把用户活配置翻转为 true（热生效，revision 67）；编辑器「高级与互动→活跃状态内切换姿势」即此开关。**上游默认值已拍板改 true**（2026-09-18 用户：「改一下，默认 true 吧」）——petween `6ed667e`（默认翻转 + 规格 §15.2 重写 + 6 处默认依赖测试更新，1044 全绿），本仓库 bump 指针；显式存过 false 的旧配置不受影响，DSH 端字段缺失的配置在下次加载时自动吃新默认。
 
 ### 已知边界（docs/06 §7）
 
