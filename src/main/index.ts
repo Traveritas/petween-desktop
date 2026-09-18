@@ -9,9 +9,19 @@
  * shell-owned page (连接 / 宠物[iframe] / 交互 / 通用).
  */
 import { app, dialog, globalShortcut } from 'electron'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { DEV_LOCAL_PORT } from './dev-port'
+import { createZcodeConnector } from './connectors/zcode-connector'
+import {
+  installZcodeHooks,
+  uninstallZcodeHooks,
+  writeZcodeHookConfigs,
+  zcodeHooksInstalled,
+  type ZcodeHooksPaths,
+} from './connectors/zcode-hooks'
+import { registerZcodeConnectorRoutes } from './connectors/zcode-routes'
 import { registerDesktopRoutes, type DesktopStatus } from './desktop-routes'
 import {
   createDesktopSettingsStore,
@@ -189,6 +199,43 @@ async function bootstrap(): Promise<void> {
     probeDsh: describeDsh,
   })
 
+  // zcode connector (docs/06): hooks POST into this local-server; the curl
+  // cfg files carry the current random port so hook registrations stay valid
+  // across boots. Disabled in settings = events dropped at the sink.
+  const zcodePaths: ZcodeHooksPaths = {
+    cfgDir: join(app.getPath('userData'), 'zcode-hooks'),
+    zcodeConfigPath: join(homedir(), '.zcode', 'cli', 'config.json'),
+  }
+  const zcodeConnector = createZcodeConnector({
+    relay: server.relay,
+    now: () => Date.now(),
+    log: (message) => console.log(message),
+  })
+  const zcodeEnabled = (): boolean => settingsStore?.get().connectors.zcode.enabled ?? true
+  const syncZcodeCfgFiles = (): Promise<void> => {
+    if (!zcodeEnabled() || server === null) return Promise.resolve()
+    return writeZcodeHookConfigs(zcodePaths.cfgDir, server.port).catch((error: unknown) => {
+      console.error('[petween-zcode] cfg sync failed', error)
+    })
+  }
+  void syncZcodeCfgFiles()
+  registerZcodeConnectorRoutes({ webServer: server.webServer }, {
+    isEnabled: zcodeEnabled,
+    onHookEvent: (input) => zcodeConnector.handle(input),
+    connectorStatus: async () => ({
+      ...zcodeConnector.status(),
+      enabled: zcodeEnabled(),
+      hooksInstalled: await zcodeHooksInstalled(zcodePaths),
+    }),
+    installHooks: async () => {
+      await syncZcodeCfgFiles()
+      await installZcodeHooks(zcodePaths)
+    },
+    uninstallHooks: async () => {
+      await uninstallZcodeHooks(zcodePaths)
+    },
+  })
+
   // DSH bridge lifecycle driven by the settings store (docs/05 Phase 4).
   let bridge: ReturnType<typeof createDshBridge> | null = null
   const startBridge = (): void => {
@@ -223,10 +270,14 @@ async function bootstrap(): Promise<void> {
   tray.update(trayState())
 
   // Live-apply settings: click-through options + rescue hotkey + bridge.
+  let prevZcodeEnabled = settings.connectors.zcode.enabled
   settingsStore.onChange((next) => {
     pointerThrough?.updateOptions(pointerOptions(next))
     syncRescueHotkey(next)
     bridgeRestart?.(next)
+    const zcodeNext = next.connectors.zcode.enabled
+    if (zcodeNext && !prevZcodeEnabled) void syncZcodeCfgFiles()
+    prevZcodeEnabled = zcodeNext
   })
 
   const overlay = createOverlayWindow()
@@ -244,6 +295,7 @@ async function bootstrap(): Promise<void> {
   app.on('quit', () => {
     if (rescueHotkey !== null) globalShortcut.unregister(rescueHotkey)
     physics.dispose()
+    zcodeConnector.dispose()
     bridge?.close()
     tray.destroy()
     void server?.close().catch(() => {})

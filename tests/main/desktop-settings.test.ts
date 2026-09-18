@@ -47,6 +47,14 @@ describe('normalizeDesktopSettings', () => {
     // always-through is the safe direction and may persist.
     expect(normalizeDesktopSettings({ clickThrough: { mode: 'always-through' } }).clickThrough.mode).toBe('always-through')
   })
+
+  it('zcode connector defaults to enabled and normalizes non-boolean input', () => {
+    expect(DEFAULT_DESKTOP_SETTINGS.connectors.zcode.enabled).toBe(true)
+    expect(normalizeDesktopSettings({}).connectors.zcode.enabled).toBe(true)
+    expect(normalizeDesktopSettings({ connectors: { zcode: { enabled: false } } }).connectors.zcode.enabled).toBe(false)
+    expect(normalizeDesktopSettings({ connectors: { zcode: { enabled: 'yes' } } }).connectors.zcode.enabled).toBe(true)
+    expect(normalizeDesktopSettings({ connectors: 'junk' }).connectors.zcode.enabled).toBe(true)
+  })
 })
 
 describe('createDesktopSettingsStore', () => {

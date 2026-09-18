@@ -35,6 +35,16 @@ export interface DesktopSettings {
   companions: {
     enabled: Record<string, boolean>
   }
+  /**
+   * Agent connectors beyond DSH (docs/06): the zcode hooks listener. `enabled`
+   * gates the event sink only — hook installation into the zcode config is an
+   * explicit user action from the settings card.
+   */
+  connectors: {
+    zcode: {
+      enabled: boolean
+    }
+  }
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -51,6 +61,11 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   },
   companions: {
     enabled: {},
+  },
+  connectors: {
+    zcode: {
+      enabled: true,
+    },
   },
 }
 
@@ -82,6 +97,8 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
   for (const [id, value] of Object.entries(enabled)) {
     if (typeof value === 'boolean') enabledMap[id] = value
   }
+  const connectors = (typeof raw.connectors === 'object' && raw.connectors !== null ? raw.connectors : {}) as Record<string, unknown>
+  const zcode = (typeof connectors.zcode === 'object' && connectors.zcode !== null ? connectors.zcode : {}) as Record<string, unknown>
   const mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
   return {
     clickThrough: {
@@ -98,6 +115,11 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
       port: clampNumber(dsh.port, PORT_MIN, PORT_MAX, DEFAULT_DESKTOP_SETTINGS.dsh.port),
     },
     companions: { enabled: enabledMap },
+    connectors: {
+      zcode: {
+        enabled: typeof zcode.enabled === 'boolean' ? zcode.enabled : true,
+      },
+    },
   }
 }
 
@@ -177,6 +199,10 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
         companions: {
           ...(settings.companions as unknown as Record<string, unknown>),
           ...((patch as { companions?: Record<string, unknown> })?.companions ?? {}),
+        },
+        connectors: {
+          ...(settings.connectors as unknown as Record<string, unknown>),
+          ...((patch as { connectors?: Record<string, unknown> })?.connectors ?? {}),
         },
       }
       settings = normalizeDesktopSettings(merged)

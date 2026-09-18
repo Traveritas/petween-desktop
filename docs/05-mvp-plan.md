@@ -132,7 +132,7 @@
 
 ## 后续增强（MVP 后，按价值排序）
 
-1. **连接器：Claude Code**（已调研 2026-09-14：hooks http handler 主动 POST 到本机端口，6/6 宠物状态显式覆盖，桥接成本最低）→ opencode（SSE，状态枚举近 1:1）→ Codex/Gemini/Cursor
+1. **连接器**：~~zcode~~（✅ 2026-09-18 Phase 9 落地，见下文与 docs/06；架构与传输家族就此定型——curl cfg 端口发现 + 合并安装 + watchdog 模板）→ Claude Code（2026-09-14 已调研：hooks http handler，6/6 状态显式覆盖；hooks 面与 zcode 同构，可复用大半）→ opencode（SSE，状态枚举近 1:1）→ Codex/Gemini/Cursor
 2. petween 侧 P0-P2 补丁回流（`dependencies` 声明、`./host` 装配桶 exports——见 02 号文档 §6；现有三仓库源码消费，P0 越发值得）
 3. 「跟随 DSH 当前会话」状态源（替代 aggregate）
 4. 救援热键可配置（现为固定候选链 P/I/U）
@@ -240,6 +240,35 @@
 - `dist/Petween Setup 0.1.0.exe`（NSIS 安装器，未签名 → SmartScreen「更多信息→仍要运行」）
 - `dist/win-unpacked/Petween.exe`（便携版）
 - 无 updater/publish（按用户要求）；数据目录与 dev 共享 `userData/petween-home/`，dev 与打包版受单实例锁互斥。
+
+## 2026-09-18（晚）：Phase 9 zcode 连接器（代码完成；真机联测两步待用户）
+
+后续增强清单第 1 项的 zcode 分支落地（规格 = docs/06；与 2026-09-14 调研的 Claude Code 首选方案同构，zcode hooks 即 Claude Code 兼容面）。复用 `StateRelay` 缝 + 伪造 DSH 信封，**petween 零改动**，与 DSH 桥按 sessionId 天然并存。
+
+### Spike 结论（2026-09-18，沙箱实测）
+
+- zcode hooks 机制存在且按 turn 跑相位（日志 `turn.phase.*: user_prompt_hooks/session_start_hooks`，子会话也跑）；**hooks 配置客户端启动时读取**——运行中的客户端对新写入的用户级/工作区级配置均不拾取（本 turn 与新 spawn 子会话都验证不触发）→ 安装后必须重启 zcode 客户端。
+- curl+cfg 链路人工验证通过：System32 curl 8.21 `--config` + `--data-urlencode`，热路径 ~50ms/次；无 Origin 头（跨源栅栏放行）。死端口 1s 超时是沙箱吞 RST 的假象，真机预计瞬时拒绝。
+- 无 zcode CLI 可调用（`~/.zcode` 全是配置/状态目录）→ 无法自动开新会话联测。
+
+### 实现清单（✅ 全部完成，126 用例全绿）
+
+- [x] `src/main/connectors/zcode-connector.ts`：8 种 hook 事件 → DSH 信封映射 + per-session watchdog（stop 后 60s 合成 idle、permission 搁置 10min 解卡、30min 静默 disposed）
+- [x] `src/main/connectors/zcode-hooks.ts`：curl cfg 渲染/每 boot 重写（端口发现）+ 安装/卸载合并写入 `~/.zcode/cli/config.json`（foreign 条目保留、损坏文件不覆盖、重装幂等）
+- [x] `src/main/connectors/zcode-routes.ts`：事件 sink（204 恒快）+ status + install/uninstall，跨源栅栏同款
+- [x] 设置存储 `connectors.zcode.enabled` + 设置页「连接」分区 zcode 卡片（替换占位卡：启停/安装移除/实时状态）
+- [x] 端到端冒烟测试（真实 curl 进程 → cfg → 路由 → 状态机 → `/state` 断言全序列）；PreToolUse 三 matcher 分类（edit/command/other，other 用负向前瞻——裸 test 假设，docs/06 §7.1 观察项）
+- [x] 版本 0.2.0，`dist-0.2.0/` 产出 NSIS + 便携版（旧 `dist/` 被运行中实例锁定，换目录打包）
+- [x] 真实 hooks 已安装到 `~/.zcode/cli/config.json`（指向 `%APPDATA%/petween-desktop/zcode-hooks/`）
+
+### 待用户真机联测（两步，顺序敏感）
+
+1. 退出当前 Petween（托盘→退出），跑 `dist-0.2.0/win-unpacked/Petween.exe`（boot 时写 cfg 文件携带随机端口）
+2. 重启 zcode 客户端，随便开个会话跑任务——宠物应随 提示→思考→工具→等待授权→完成 联动；设置页 zcode 卡片应显示最近事件
+
+### 已知边界（docs/06 §7）
+
+error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 success）；应用未运行时每次工具调用在 zcode 日志留一条 curl failed 记录（不阻塞，exit≠2）；matcher 锚定语义与 Stop-错误回合行为待真机确认。
 
 ## 待用户拍板项
 

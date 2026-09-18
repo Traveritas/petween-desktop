@@ -30,7 +30,8 @@ petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 +
 | `docs/02-architecture.md` | 目标架构 + **host/client 装配清单** + 工程边界 + dev/prod 同源设计 | 写任何装配代码前 |
 | `docs/03-dsh-bridge-spec.md` | DSH 状态桥规格级契约（帧格式/生命周期/9 条转换） | 写 dsh-bridge 前，**不需要再读 DSH 源码** |
 | `docs/04-electron-notes.md` | Electron 44 技术要点（透明窗/穿透/托盘/打包/测试，含已知坑与 issue 号） | 写壳层代码前 |
-| `docs/05-mvp-plan.md` | **执行入口**：Phase 0~8 任务清单 + 验收标准 + v0.1.0 里程碑评审 | 任何时候——当前进度记录于此 |
+| `docs/05-mvp-plan.md` | **执行入口**：Phase 0~9 任务清单 + 验收标准 + v0.1.0 里程碑评审 | 任何时候——当前进度记录于此 |
+| `docs/06-zcode-connector.md` | zcode 连接器规格（事件映射/传输与端口发现/安装卸载/watchdog/观察项） | 改 connectors/ 下任何代码前；做其他 Agent 连接器时作模板 |
 
 ## 4. 关键架构决策速览
 
@@ -77,6 +78,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-16（夜）：v0.1.0 里程碑**——五路子智能体综合评审（主进程/渲染层/测试/文档/安全），零 P0、4 个 P1 + 一批 P2 当场修复（打包排除、设置持久化竞态与 flushSync、启动兜底、minWidth 算术、PUT 竞态、跨源写栅栏、测试盲区补齐），89 用例全绿后打标签；评审记录与 backlog 见 docs/05「v0.1.0 里程碑评审」。
 - 待办与后续增强入口 = docs/05「后续增强」清单、「v0.1.0 里程碑评审 backlog」与「待用户拍板项」（连接器 Claude Code 首选、petween P0-P2 回流、跟随会话、热键可配置、多显示器等）。~~发版前必做：builder 排除~~（✅ 评审时已修）。
 - **2026-09-18：本地发布构建 + prod 双 React P0 修复**：dist 链走通（NSIS+便携版，按用户要求不接 updater/publish）；修复 prod 渲染包双 React（`resolve.dedupe`，dev 测不出的坑，详见 docs/05「2026-09-18」节）；打包版全链路验证（CDP 挂载/精灵图/轮询 + DPI-aware 像素显隐差分 + 设置窗五分区）。
+- **2026-09-18（晚）：Phase 9 zcode 连接器代码完成**（规格 docs/06；StateRelay 缝 + 伪造 DSH 信封，petween 零改动；curl cfg 端口发现 + 合并安装 + per-session watchdog；126 用例全绿含真实 curl 端到端冒烟；v0.2.0 产物在 `dist-0.2.0/`；真实 hooks 已装入 `~/.zcode/cli/config.json`）。**真机联测两步待用户**：换跑 0.2.0 便携版 → 重启 zcode 客户端。注意：zcode hooks 配置**客户端启动时读取**（运行中不热加载，spike 实证）。
 - petween 基线：55 测试文件 / 1044 用例全绿（preset-authority 阶段 3 后）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则
