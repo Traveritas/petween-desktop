@@ -142,14 +142,29 @@ registerBubbleEnterAnimation({
   id: 'drift-in',
   label: '飘落',
   className: 'pt-bubble-enter-drift-in',
+  // Two independent animations so each easing stays clean: the FALL (with
+  // the fade) runs one smooth curve, the SWAY oscillates on its own property
+  // with per-half-period ease-in-out (the classic CSS pendulum — no braking
+  // at waypoints). Sway is a rotation around a pivot above the bubble, so it
+  // reads as horizontal drift, not a tilt in place.
   css: `
-@keyframes pt-bubble-drift-in {
-  0% { transform: translate(calc(-50% - 6px), -34px) rotate(-2deg); opacity: 0; }
-  45% { transform: translate(calc(-50% + 5px), -14px) rotate(1.4deg); opacity: 0.65; }
-  80% { transform: translate(calc(-50% - 2px), -4px) rotate(-0.5deg); opacity: 0.95; }
-  100% { transform: translate(-50%, 0) rotate(0deg); opacity: 1; }
+.pt-bubble-enter-drift-in {
+  transform-origin: 50% -80px;
+  animation:
+    pt-bubble-drift-fall 640ms cubic-bezier(0.3, 0.7, 0.4, 1) both,
+    pt-bubble-drift-in-sway 640ms ease-in-out both;
 }
-.pt-bubble-enter-drift-in { animation: pt-bubble-drift-in 650ms ease-out both; }
+@keyframes pt-bubble-drift-fall {
+  from { transform: translate(-50%, -34px); opacity: 0; }
+  60% { opacity: 0.9; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+@keyframes pt-bubble-drift-in-sway {
+  0% { rotate: -2.4deg; }
+  40% { rotate: 1.8deg; }
+  75% { rotate: -0.8deg; }
+  100% { rotate: 0deg; }
+}
 `,
 })
 
@@ -195,14 +210,28 @@ registerBubbleExitAnimation({
   id: 'drift',
   label: '随风',
   className: 'pt-bubble-exit-drift',
+  // Same two-property split as 飘落: one smooth RISE+fade curve, plus a
+  // pendulum sway on the rotate property (per-half-period ease-in-out) —
+  // the rise never brakes at the sway's turning points.
   css: `
-@keyframes pt-bubble-drift-out {
-  0% { transform: translate(-50%, 0) rotate(0deg); opacity: 1; }
-  30% { transform: translate(calc(-50% + 5px), -12px) rotate(1.6deg); opacity: 0.85; }
-  60% { transform: translate(calc(-50% - 4px), -26px) rotate(-1.2deg); opacity: 0.55; }
-  100% { transform: translate(calc(-50% + 3px), -42px) rotate(0.8deg); opacity: 0; }
+.pt-bubble-exit-drift {
+  transform-origin: 50% -80px;
+  animation:
+    pt-bubble-drift-rise 1000ms cubic-bezier(0.3, 0.4, 0.5, 1) both,
+    pt-bubble-drift-out-sway 1000ms ease-in-out both;
 }
-.pt-bubble-exit-drift { animation: pt-bubble-drift-out 950ms ease-in-out both; }
+@keyframes pt-bubble-drift-rise {
+  0% { transform: translate(-50%, 0); opacity: 1; }
+  40% { opacity: 0.88; }
+  100% { transform: translate(-50%, -46px); opacity: 0; }
+}
+@keyframes pt-bubble-drift-out-sway {
+  0% { rotate: 0deg; }
+  25% { rotate: 2.2deg; }
+  50% { rotate: -1.8deg; }
+  75% { rotate: 1.4deg; }
+  100% { rotate: 0.6deg; }
+}
 `,
-  durationMs: 1000,
+  durationMs: 1050,
 })
