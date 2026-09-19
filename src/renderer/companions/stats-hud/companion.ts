@@ -24,24 +24,36 @@ import { StatsHudCard } from './settings-card'
 
 export const STATS_HUD_ID = 'stats-hud'
 
-/** Stored under desktop-settings companions.options['stats-hud']. */
-export interface StatsHudOptions extends HudOptions {
+/** Per-bubble-type visual config — each of 思考/编辑/回复/完成 skins itself. */
+export interface BubbleTypeConfig {
   styleId?: string
-  replyStyleId?: string
-  turnStyleId?: string
   enterAnimationId?: string
   exitAnimationId?: string
+  /** How long the finished bubble stays before fading (ms). */
+  holdMs?: number
+}
+
+export type BubbleTypeKey = 'thinking' | 'edit' | 'reply' | 'turn'
+
+/** Stored under desktop-settings companions.options['stats-hud']. */
+export interface StatsHudOptions extends HudOptions {
+  types: Record<BubbleTypeKey, BubbleTypeConfig>
   dialogue?: boolean
   milestoneAnimationId?: string
   /** Border-to-border gap between columns (px). */
   columnGapPx?: number
 }
 
+export const DEFAULT_HOLDS: Record<BubbleTypeKey, number> = {
+  thinking: DEFAULT_HUD_OPTIONS.thinkingHoldMs,
+  edit: DEFAULT_HUD_OPTIONS.editHoldMs,
+  turn: 4000,
+  reply: 7000,
+}
+
 const STATS_POLL_MS = 400
 const TIMER_TICK_MS = 250
 const SETTINGS_POLL_MS = 3000
-const TURN_HOLD_MS = 4000
-const REPLY_HOLD_MS = 7000
 const MILESTONE_ANIMATION_DEFAULT = 'builtin:click-pop'
 const MILESTONE_THROTTLE_MS = 10_000
 const DIALOGUE_RETRIES = 3
@@ -52,14 +64,46 @@ const clampMin = (value: unknown, fallback: number, min: number): number =>
 
 const asId = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
 
+const isBubbleTypeKey = (value: string): value is BubbleTypeKey =>
+  value === 'thinking' || value === 'edit' || value === 'reply' || value === 'turn'
+
+/**
+ * Migrate the RAW option bag to per-type configs. v0.3.3-and-earlier flat
+ * keys map onto the new shape so an existing pick keeps its exact look:
+ * styleId → thinking+edit; replyStyleId/turnStyleId → their types; the
+ * global animation pair → every type; thinkingHoldMs/editHoldMs → holds.
+ */
+export function migrateTypeConfigs(raw: unknown): Record<BubbleTypeKey, Required<Pick<BubbleTypeConfig, 'holdMs'>> & BubbleTypeConfig> {
+  const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const legacyStyle = asId(bag.styleId)
+  const legacyEnter = asId(bag.enterAnimationId)
+  const legacyExit = asId(bag.exitAnimationId)
+  const legacy = {
+    thinking: { styleId: legacyStyle, enterAnimationId: legacyEnter, exitAnimationId: legacyExit, holdMs: clampMin(bag.thinkingHoldMs, DEFAULT_HOLDS.thinking, 0) },
+    edit: { styleId: legacyStyle, enterAnimationId: legacyEnter, exitAnimationId: legacyExit, holdMs: clampMin(bag.editHoldMs, DEFAULT_HOLDS.edit, 0) },
+    reply: { styleId: asId(bag.replyStyleId), enterAnimationId: legacyEnter, exitAnimationId: legacyExit, holdMs: DEFAULT_HOLDS.reply },
+    turn: { styleId: asId(bag.turnStyleId), enterAnimationId: legacyEnter, exitAnimationId: legacyExit, holdMs: DEFAULT_HOLDS.turn },
+  }
+  const result = { ...legacy }
+  const types = (typeof bag.types === 'object' && bag.types !== null ? bag.types : {}) as Record<string, unknown>
+  for (const [key, value] of Object.entries(types)) {
+    if (!isBubbleTypeKey(key) || typeof value !== 'object' || value === null) continue
+    const cfg = value as Record<string, unknown>
+    result[key] = {
+      styleId: asId(cfg.styleId),
+      enterAnimationId: asId(cfg.enterAnimationId),
+      exitAnimationId: asId(cfg.exitAnimationId),
+      holdMs: clampMin(cfg.holdMs, legacy[key].holdMs, 0),
+    }
+  }
+  return result
+}
+
 function normalizeOptions(raw: unknown): StatsHudOptions {
   const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const types = migrateTypeConfigs(raw)
   return {
-    styleId: asId(bag.styleId),
-    replyStyleId: asId(bag.replyStyleId),
-    turnStyleId: asId(bag.turnStyleId),
-    enterAnimationId: asId(bag.enterAnimationId),
-    exitAnimationId: asId(bag.exitAnimationId),
+    types,
     dialogue: typeof bag.dialogue === 'boolean' ? bag.dialogue : true,
     milestoneAnimationId: asId(bag.milestoneAnimationId) ?? MILESTONE_ANIMATION_DEFAULT,
     columnGapPx: clampMin(bag.columnGapPx, 24, 0),
@@ -67,8 +111,9 @@ function normalizeOptions(raw: unknown): StatsHudOptions {
     turnSummary: typeof bag.turnSummary === 'boolean' ? bag.turnSummary : true,
     milestoneEveryLines: clampMin(bag.milestoneEveryLines, 0, 0),
     thinkingShowThresholdMs: clampMin(bag.thinkingShowThresholdMs, DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs, 0),
-    thinkingHoldMs: clampMin(bag.thinkingHoldMs, DEFAULT_HUD_OPTIONS.thinkingHoldMs, 0),
-    editHoldMs: clampMin(bag.editHoldMs, DEFAULT_HUD_OPTIONS.editHoldMs, 0),
+    // The reducer keeps its flat hold keys; they now source from the types.
+    thinkingHoldMs: types.thinking.holdMs,
+    editHoldMs: types.edit.holdMs,
     editMaxAgeMs: clampMin(bag.editMaxAgeMs, DEFAULT_HUD_OPTIONS.editMaxAgeMs, 0),
   }
 }
@@ -120,26 +165,27 @@ export function createStatsHudCompanion(): DesktopCompanion {
         timers.add(timer)
       }
 
-      const spawnHeld = (
+      const spawnWith = (
         key: string,
         sessionId: string,
+        type: BubbleTypeKey,
         content: Parameters<BubbleHandle['update']>[0],
-        holdMs: number,
         placement: 'column' | 'left' | 'below' = 'column',
-        styleId?: string,
-      ): void => {
+        holdOverrideMs?: number,
+      ): BubbleHandle => {
+        const cfg = options.types[type]
         const handle = host.spawn({
           key,
           sessionKey: sessionId,
           placement,
-          styleId: styleId ?? options.styleId,
-          enterAnimationId: options.enterAnimationId,
-          exitAnimationId: options.exitAnimationId,
+          styleId: cfg.styleId,
+          enterAnimationId: cfg.enterAnimationId,
+          exitAnimationId: cfg.exitAnimationId,
           content,
         })
-        if (holdMs > 0) {
-          later(() => handle.close(), holdMs)
-        }
+        const hold = holdOverrideMs ?? cfg.holdMs ?? 0
+        if (hold > 0) later(() => handle.close(), hold)
+        return handle
       }
 
       /** Reply preview for the just-finished turn; the rollout write may lag
@@ -158,7 +204,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
                 return
               }
               if (preview.text === '') return
-              spawnHeld(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, { kind: 'reply', sessionId, text: preview.text }, REPLY_HOLD_MS, 'left', options.replyStyleId)
+              spawnWith(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, 'reply', { kind: 'reply', sessionId, text: preview.text }, 'left')
             })
             .catch(() => {})
         }
@@ -169,14 +215,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
         switch (command.type) {
           case 'thinking-show': {
             const key = keyOf.thinking(command.sessionId)
-            const handle = host.spawn({
-              key,
-              sessionKey: command.sessionId,
-              styleId: options.styleId,
-              enterAnimationId: options.enterAnimationId,
-              exitAnimationId: options.exitAnimationId,
-              content: { kind: 'thinking', sessionId: command.sessionId, startedAt: command.startedAt },
-            })
+            const handle = spawnWith(key, command.sessionId, 'thinking', { kind: 'thinking', sessionId: command.sessionId, startedAt: command.startedAt })
             thinking.set(command.sessionId, { handle, startedAt: command.startedAt, finalMs: null })
             break
           }
@@ -196,14 +235,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
             const key = keyOf.edit(command.sessionId)
             editHandles.set(
               command.sessionId,
-              host.spawn({
-                key,
-                sessionKey: command.sessionId,
-                styleId: options.styleId,
-                enterAnimationId: options.enterAnimationId,
-                exitAnimationId: options.exitAnimationId,
-                content: { kind: 'edit', sessionId: command.sessionId, added: command.added, removed: command.removed, files: command.files },
-              }),
+              spawnWith(key, command.sessionId, 'edit', { kind: 'edit', sessionId: command.sessionId, added: command.added, removed: command.removed, files: command.files }),
             )
             break
           }
@@ -227,9 +259,10 @@ export function createStatsHudCompanion(): DesktopCompanion {
             break
           }
           case 'turn-show': {
-            spawnHeld(
+            spawnWith(
               keyOf.turn(command.sessionId, command.turnId),
               command.sessionId,
+              'turn',
               {
                 kind: 'turn',
                 sessionId: command.sessionId,
@@ -239,9 +272,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
                 edits: command.edits,
                 durationMs: command.durationMs,
               },
-              TURN_HOLD_MS,
               'below',
-              options.turnStyleId,
             )
             pullDialogue(command.sessionId, command.turnId)
             break
@@ -299,16 +330,14 @@ export function createStatsHudCompanion(): DesktopCompanion {
           .then((body: { settings?: { companions?: { options?: Record<string, unknown> } } } | null) => {
             if (disposed || body === null) return
             const next = normalizeOptions(body.settings?.companions?.options?.[STATS_HUD_ID])
-            // Unknown registry ids fall back to the default skin silently.
-            for (const key of ['styleId', 'replyStyleId', 'turnStyleId'] as const) {
-              const id = next[key]
-              if (id !== undefined && !listBubbleStyles().some((style) => style.id === id)) next[key] = undefined
-            }
-            if (next.enterAnimationId !== undefined && !listBubbleEnterAnimations().some((animation) => animation.id === next.enterAnimationId)) {
-              next.enterAnimationId = undefined
-            }
-            if (next.exitAnimationId !== undefined && !listBubbleExitAnimations().some((animation) => animation.id === next.exitAnimationId)) {
-              next.exitAnimationId = undefined
+            // Unknown registry ids fall back to defaults silently, per type.
+            const styles = listBubbleStyles()
+            const enters = listBubbleEnterAnimations()
+            const exits = listBubbleExitAnimations()
+            for (const cfg of Object.values(next.types)) {
+              if (cfg.styleId !== undefined && !styles.some((style) => style.id === cfg.styleId)) cfg.styleId = undefined
+              if (cfg.enterAnimationId !== undefined && !enters.some((animation) => animation.id === cfg.enterAnimationId)) cfg.enterAnimationId = undefined
+              if (cfg.exitAnimationId !== undefined && !exits.some((animation) => animation.id === cfg.exitAnimationId)) cfg.exitAnimationId = undefined
             }
             host.setColumnGap(next.columnGapPx ?? 24)
             options = next
