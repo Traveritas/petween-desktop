@@ -180,7 +180,7 @@
 
 **实施记录（含一次事故）**：
 - **2026-09-16 鼠标卡死事故**：调试期间把模式切到 always-interactive 且被持久化 → 整屏窗吃掉系统所有鼠标点击（键盘不受影响，overlay focusable:false）；救援热键 Ctrl+Alt+P 被占用注册失败 → 无逃生口。**用户拍板：该模式整体移除**（与救援热键的瞬时锁定功能重叠且是唯一能卡死鼠标的路径）；救援热键改为链式注册（Ctrl+Alt+P→I→U）。任何残留的 always-interactive 设置值归一化为 auto。
-- **坐标空间教训**：本机 2560×1600@100%，overlay CSS 视口 = 2560×1600；computer-use 截图 raster 是半采样（1280×800）——换算 raster×2=CSS。给视觉模型喂先验坐标会得到顺从性误判（报错误位置"确认存在"），验收要以 config overlay 值/bodyRect 等数据源为准。
+- **坐标空间教训**：以本机为例（2560×1600@100%）：overlay CSS 视口即物理分辨率，而自动化截图 raster 可能是半采样（如 1280×800）——换算 raster×2=CSS。给视觉模型喂先验坐标会得到顺从性误判（报错误位置"确认存在"），验收要以 config overlay 值/bodyRect 等数据源为准。
 - **排查顺带证实**：穿透三通道（转发 hit-test/光标轮询/滞回）在真实数据下判定全部正确。
 - **待办**：`dist:win` 前需在 electron-builder.yml files 加 `!node_modules/petween-physics`（防止 link 跟进 submodule）；dev 长会话中 main 热重启监视器偶发失灵（重启 dev 即恢复，低优先级记录）。
 
@@ -233,7 +233,7 @@
 
 1. **prod 渲染产物必须单独验证挂载**——dev 正常不证明打包正常（依赖解析路径不同）。后续增强清单的「Playwright 冒烟」正是为此。
 2. GDI `CopyFromScreen` 截图在 DPI-unaware 进程里拿到的是缩放副本，且**抓不到 layered 透明窗内容**——对 overlay 做像素验证必须先 `SetProcessDPIAware()`。
-3. electron-builder 下载（Electron zip 等）不走系统代理，需 `HTTPS_PROXY=http://127.0.0.1:7897 pnpm run dist:win`（Clash 混合端口）。
+3. electron-builder 下载（Electron zip 等）不走系统代理，需 `HTTPS_PROXY=http://<本地代理地址> pnpm run dist:win`（本机代理环境）。
 
 ### 产物
 

@@ -58,7 +58,7 @@ pnpm test                                                                # 壳�
 pnpm dist:win                                                            # petween 构建 → 三段构建 → NSIS+便携版
 ```
 
-注意：pnpm 10 拦截依赖构建脚本，`pnpm.onlyBuiltDependencies`（electron/esbuild）已写入 package.json；Electron 二进制缺失时跑 `node node_modules/electron/install.js`；electron-builder 下载（Electron zip 等）不走系统代理，需 `HTTPS_PROXY=http://127.0.0.1:7897 pnpm run dist:win`（Clash 混合端口）。
+注意：pnpm 10 拦截依赖构建脚本，`pnpm.onlyBuiltDependencies`（electron/esbuild）已写入 package.json；Electron 二进制缺失时跑 `node node_modules/electron/install.js`；electron-builder 下载（Electron zip 等）不走系统代理，需 `HTTPS_PROXY=http://<本地代理地址> pnpm run dist:win`（本机代理环境）。
 
 ## 6. 当前状态
 
