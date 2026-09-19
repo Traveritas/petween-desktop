@@ -97,11 +97,17 @@ interface BubbleEntry {
 
 /**
  * Column slots: focused session → 0 (above the pet); the rest sorted by
- * recency → -1, +1, -2, +2 … Pure so the layout is unit-testable.
+ * recency. With room information the sides are chosen by AVAILABLE SPACE
+ * (each column goes to whichever side has more room left) — a pet parked at
+ * a screen edge gets ALL side columns on its inward side instead of having
+ * the outward ones viewport-clamped on top of itself (verified live, v0.3.1
+ * feedback round). Without room info the classic alternation applies.
+ * Pure so the layout is unit-testable.
  */
 export function assignColumnSlots(
   sessions: ReadonlyArray<{ key: string; lastActiveAt: number }>,
   focused: string | null,
+  room?: { leftPx: number; rightPx: number; stridePx: number },
 ): Map<string, number> {
   const slots = new Map<string, number>()
   if (sessions.length === 0) return slots
@@ -110,17 +116,31 @@ export function assignColumnSlots(
   slots.set(focus, 0)
   let nextNegative = -1
   let nextPositive = 1
+  let left = room?.leftPx ?? Infinity
+  let right = room?.rightPx ?? Infinity
+  const stride = room?.stridePx ?? 0
   for (const entry of ordered) {
     if (entry.key === focus) continue
-    // Alternate sides, starting left; prefer whichever side sits closer to
-    // the pet so the columns stay bunched (reading order: leftmost is
-    // second-newest).
-    if (-nextNegative <= nextPositive) {
+    let useLeft: boolean
+    if (room === undefined) {
+      // No room info: classic left-first alternation.
+      useLeft = -nextNegative <= nextPositive
+    } else {
+      const fitsLeft = left >= stride
+      const fitsRight = right >= stride
+      if (fitsLeft && fitsRight) useLeft = left >= right
+      else if (fitsLeft) useLeft = true
+      else if (fitsRight) useLeft = false
+      else useLeft = left >= right // nothing fits: pile onto the roomier side
+    }
+    if (useLeft) {
       slots.set(entry.key, nextNegative)
       nextNegative -= 1
+      left -= stride
     } else {
       slots.set(entry.key, nextPositive)
       nextPositive += 1
+      right -= stride
     }
   }
   return slots
@@ -302,16 +322,23 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
       }
     }
     // Columns: focused session above the pet, others flanking — bunched close
-    // (user feedback: far-flung columns read as clutter, not information).
+    // (user feedback: far-flung columns read as clutter, not information) and
+    // room-aware: a pet near a screen edge sends every side column inward
+    // (viewport clamping used to press them onto the pet — verified live).
     const sessions = [...columns.entries()].map(([key, column]) => ({
       key,
       lastActiveAt: Math.max(...column.map((entry) => entry.lastTouchedAt)),
     }))
-    const slots = assignColumnSlots(sessions, focusedSession)
+    const petCenterX = anchor.x + anchor.width / 2
     const stride = Math.max(anchor.width / 2 + 110, 150)
+    const slots = assignColumnSlots(sessions, focusedSession, {
+      leftPx: petCenterX - margin,
+      rightPx: view.width - margin - petCenterX,
+      stridePx: stride,
+    })
     for (const [key, column] of columns) {
       const slot = slots.get(key) ?? 0
-      layoutColumn(column, anchor.x + anchor.width / 2 + slot * stride, anchor, view)
+      layoutColumn(column, petCenterX + slot * stride, anchor, view)
     }
     layoutLeftStack(leftStack, anchor, view)
     layoutBelowStack(belowStack, anchor, view)
