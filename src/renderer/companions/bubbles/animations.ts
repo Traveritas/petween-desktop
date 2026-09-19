@@ -143,13 +143,12 @@ registerBubbleEnterAnimation({
   label: '飘落',
   className: 'pt-bubble-enter-drift-in',
   // Two independent animations so each easing stays clean: the FALL (with
-  // the fade) runs one smooth curve, the SWAY oscillates on its own property
-  // with per-half-period ease-in-out (the classic CSS pendulum — no braking
-  // at waypoints). Sway is a rotation around a pivot above the bubble, so it
-  // reads as horizontal drift, not a tilt in place.
+  // the fade) runs one smooth curve, the SWAY oscillates on its own
+  // properties (translate for horizontal drift + rotate for a light tilt)
+  // with per-half-period ease-in-out. Wind is stronger higher up: the sway
+  // envelope DECAYS as the bubble falls and settles (user spec v0.3.9).
   css: `
 .pt-bubble-enter-drift-in {
-  transform-origin: 50% -80px;
   animation:
     pt-bubble-drift-fall 640ms cubic-bezier(0.3, 0.7, 0.4, 1) both,
     pt-bubble-drift-in-sway 640ms ease-in-out both;
@@ -160,10 +159,11 @@ registerBubbleEnterAnimation({
   to { transform: translate(-50%, 0); opacity: 1; }
 }
 @keyframes pt-bubble-drift-in-sway {
-  0% { rotate: -2.4deg; }
-  40% { rotate: 1.8deg; }
-  75% { rotate: -0.8deg; }
-  100% { rotate: 0deg; }
+  0% { rotate: -3.2deg; translate: -14px 0; }
+  30% { rotate: 2.4deg; translate: 10px 0; }
+  60% { rotate: -1.4deg; translate: -6px 0; }
+  85% { rotate: 0.6deg; translate: 2px 0; }
+  100% { rotate: 0deg; translate: 0px 0; }
 }
 `,
 })
@@ -210,12 +210,10 @@ registerBubbleExitAnimation({
   id: 'drift',
   label: '随风',
   className: 'pt-bubble-exit-drift',
-  // Same two-property split as 飘落: one smooth RISE+fade curve, plus a
-  // pendulum sway on the rotate property (per-half-period ease-in-out) —
-  // the rise never brakes at the sway's turning points.
+  // Same two-property split as 飘落, with the envelope REVERSED: the bubble
+  // rises into stronger wind, so the sway GROWS until it fades out.
   css: `
 .pt-bubble-exit-drift {
-  transform-origin: 50% -80px;
   animation:
     pt-bubble-drift-rise 1000ms cubic-bezier(0.3, 0.4, 0.5, 1) both,
     pt-bubble-drift-out-sway 1000ms ease-in-out both;
@@ -226,11 +224,11 @@ registerBubbleExitAnimation({
   100% { transform: translate(-50%, -46px); opacity: 0; }
 }
 @keyframes pt-bubble-drift-out-sway {
-  0% { rotate: 0deg; }
-  25% { rotate: 2.2deg; }
-  50% { rotate: -1.8deg; }
-  75% { rotate: 1.4deg; }
-  100% { rotate: 0.6deg; }
+  0% { rotate: 0deg; translate: 0px 0; }
+  22% { rotate: 1.2deg; translate: 6px 0; }
+  50% { rotate: -1.8deg; translate: -9px 0; }
+  78% { rotate: 2.6deg; translate: 13px 0; }
+  100% { rotate: -3.4deg; translate: -17px 0; }
 }
 `,
   durationMs: 1050,
