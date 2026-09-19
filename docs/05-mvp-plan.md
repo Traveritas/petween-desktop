@@ -400,3 +400,5 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 3. **布局重构**（放开旧排版，参考美学 skill=impeccable/Operate 模式）：三栏 DCC 语法——**左列动画库 | 中列预览舞台+传输条、时间轴面板 | 右列属性/检查器/操作**。检查器经 TimelineEditor 新 `inspectorTarget` portal prop 停靠右栏（缺省仍内联，V1.1 行为不变）；传输条带播放头 tabular-nums 时间读数；撤销/重做并入时间轴面板头；≤1280px 属性栏折叠到时间轴下方。审查方式：无头 Edge CDP 截图（空态+选中态）+ DOM 几何探针（临时 harness，已删）。
 
 上游 1111 / 桌面 194 用例全绿。**真机复验待用户**（重装 dist 或 dev）。
+
+- **补记（同日第二轮）**：光标闪动第一轮修复无效；改证据法——CDP 命中测试逐 2px 采样光标地图，真根因=lanes 面板 8px 内边距环与轨道间 2px 接缝全是 `auto`。修复：面板表面统一 crosshair（`.timelineLanes`/`.timelineRow`），标签列显式 default（上游 `f21d904` / 桌面 `10b9a3f`）。复测地图干净。
