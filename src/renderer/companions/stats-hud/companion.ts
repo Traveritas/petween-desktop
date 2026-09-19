@@ -27,6 +27,8 @@ export const STATS_HUD_ID = 'stats-hud'
 /** Stored under desktop-settings companions.options['stats-hud']. */
 export interface StatsHudOptions extends HudOptions {
   styleId?: string
+  replyStyleId?: string
+  turnStyleId?: string
   enterAnimationId?: string
   exitAnimationId?: string
   dialogue?: boolean
@@ -52,6 +54,8 @@ function normalizeOptions(raw: unknown): StatsHudOptions {
   const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
   return {
     styleId: asId(bag.styleId),
+    replyStyleId: asId(bag.replyStyleId),
+    turnStyleId: asId(bag.turnStyleId),
     enterAnimationId: asId(bag.enterAnimationId),
     exitAnimationId: asId(bag.exitAnimationId),
     dialogue: typeof bag.dialogue === 'boolean' ? bag.dialogue : true,
@@ -112,11 +116,19 @@ export function createStatsHudCompanion(): DesktopCompanion {
         timers.add(timer)
       }
 
-      const spawnHeld = (key: string, sessionId: string, content: Parameters<BubbleHandle['update']>[0], holdMs: number): void => {
+      const spawnHeld = (
+        key: string,
+        sessionId: string,
+        content: Parameters<BubbleHandle['update']>[0],
+        holdMs: number,
+        placement: 'column' | 'left' | 'below' = 'column',
+        styleId?: string,
+      ): void => {
         const handle = host.spawn({
           key,
           sessionKey: sessionId,
-          styleId: options.styleId,
+          placement,
+          styleId: styleId ?? options.styleId,
           enterAnimationId: options.enterAnimationId,
           exitAnimationId: options.exitAnimationId,
           content,
@@ -142,7 +154,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
                 return
               }
               if (preview.text === '') return
-              spawnHeld(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, { kind: 'reply', sessionId, text: preview.text }, REPLY_HOLD_MS)
+              spawnHeld(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, { kind: 'reply', sessionId, text: preview.text }, REPLY_HOLD_MS, 'left', options.replyStyleId)
             })
             .catch(() => {})
         }
@@ -224,6 +236,8 @@ export function createStatsHudCompanion(): DesktopCompanion {
                 durationMs: command.durationMs,
               },
               TURN_HOLD_MS,
+              'below',
+              options.turnStyleId,
             )
             pullDialogue(command.sessionId, command.turnId)
             break
@@ -282,8 +296,9 @@ export function createStatsHudCompanion(): DesktopCompanion {
             if (disposed || body === null) return
             const next = normalizeOptions(body.settings?.companions?.options?.[STATS_HUD_ID])
             // Unknown registry ids fall back to the default skin silently.
-            if (next.styleId !== undefined && !listBubbleStyles().some((style) => style.id === next.styleId)) {
-              next.styleId = undefined
+            for (const key of ['styleId', 'replyStyleId', 'turnStyleId'] as const) {
+              const id = next[key]
+              if (id !== undefined && !listBubbleStyles().some((style) => style.id === id)) next[key] = undefined
             }
             if (next.enterAnimationId !== undefined && !listBubbleEnterAnimations().some((animation) => animation.id === next.enterAnimationId)) {
               next.enterAnimationId = undefined

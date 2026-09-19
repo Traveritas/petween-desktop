@@ -85,6 +85,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-19：Phase 12 手感一批代码完成**（上游 `900f1d6`：sampleTimelineAt 采样预览（与播放逐像素一致）+ PreviewSession.scrubDefinition 直写舞台层 + Ctrl+滚轮光标锚缩放/滚轮平移 + ms 自适应标尺（1-2-5 步进）+ 目标吸附（帧/事件/播放头，Alt 临时禁用，擦洗排除自身）+ Space 播放/停止；TimelineEditor 全部可选 props，V1.1 行为零变化；1088 用例全绿。桌面仅 bump 指针；**真机验收待用户**）。
 - **2026-09-19（泡泡反馈批，v0.2.5→0.2.6）**：用户确认写入泡泡真机正常；思考计时改整秒显示（v0.2.3）；**入场/出场动画拆分为独立选项**（设置卡双下拉；close 时先摘入场类再加出场类，不依赖级联顺序；旧 `animationId` 存量按 LEGACY_BUNDLED_EXITS 迁移）；「随风」慢淡出出场 + 「飘落」入场一对（出场动画新增 `durationMs`，宿主按其移除元素）。20 种组合，202 用例全绿。
 - **2026-09-19（泡泡线第二批，v0.3.0）**：多会话泡泡分列排布（BubbleHost 多列 + 共享单例 + assignColumnSlots 纯函数；multiSession 默认开）+ 完成提醒泡泡（账本回合追踪 → turn-summary 事件）+ 对话泡泡（rollout model-io 流式前扫，单行内嵌全量请求上下文 >1MB 故无固定尾窗；markdown 剥离/160 字截断在 main 边界；GET /dialogue 唯一内容级通道）+ 里程碑宠物动画（每 N 新增行 builtin:click-pop，10s 节流）。224 用例全绿；**真机验收待用户**（详见 docs/05 Phase 10 第二批）。
+- **2026-09-19（泡泡反馈批 2，v0.3.1）**：泡泡重排渐变（left/top 260ms 过渡 + 首次定位免过渡）、列间距收紧（宠物宽/2+110）；回复泡泡独立到宠物左侧 + 专属样式 + 3 行裁剪、完成泡泡独立到宠物下侧 + 专属样式——布局模型升级为 column/left/below 三区域（互不推挤，固定栈容量 2）。224 用例全绿。
 - petween 基线：64 测试文件 / 1111 用例全绿（`50942a5` = V1.2 工作台 + P12 scrub/zoom + P13 多选/undo + P14 曲线编辑器；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则

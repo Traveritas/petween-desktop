@@ -43,6 +43,15 @@ export interface BubbleSpawnSpec {
   key: string
   /** Column group — one column per agent session ("" = the legacy shared column). */
   sessionKey?: string
+  /**
+   * Where the bubble lives (user-directed second-batch feedback):
+   * - column: the per-session stacks above the pet (stats bubbles; flanking
+   *   columns for background sessions)
+   * - left: the fixed stack at the pet's LEFT edge (reply previews —
+   *   independent of the columns, content clamped)
+   * - below: the fixed stack under the pet (turn summaries — independent)
+   */
+  placement?: 'column' | 'left' | 'below'
   styleId?: string
   enterAnimationId?: string
   exitAnimationId?: string
@@ -73,11 +82,14 @@ export interface BubbleHostOptions {
 interface BubbleEntry {
   key: string
   sessionKey: string
+  placement: 'column' | 'left' | 'below'
   el: HTMLElement
   style: BubbleStyle
   /** Removed on close so enter and exit never share the animation property. */
   enterClass: string
   lastTouchedAt: number
+  /** False until the first layout — the first position must not transition. */
+  placed: boolean
   closing: boolean
   closed: boolean
   removeTimer: ReturnType<typeof setTimeout> | null
@@ -118,6 +130,14 @@ const BASE_CSS = `
 .pt-bubbles { position: fixed; inset: 0; pointer-events: none; z-index: 2147483000; }
 .pt-bubble { position: absolute; transform: translate(-50%, 0); white-space: nowrap; max-width: 340px; }
 .pt-bubble--wrap { white-space: normal; }
+/* Repositioning glides instead of jumping (new/evicted/relayouted bubbles).
+   First placement suppresses the transition inline (see layout). */
+.pt-bubble--placed { transition: left 260ms ease, top 260ms ease; }
+/* Reply previews: fixed left placement, content clamped to three lines. */
+.pt-bubble--at-left { max-width: 300px; white-space: normal; }
+.pt-bubble--at-left .pt-bubble__reply {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
 @keyframes pt-bubble-bump {
   0% { transform: translate(-50%, 0) scale(1); }
   40% { transform: translate(-50%, 0) scale(1.12); }
@@ -128,6 +148,8 @@ const BASE_CSS = `
 
 const BUMP_MS = 240
 const TOTAL_CAP_MULTIPLIER = 3
+/** Fixed stacks (left/below) carry transient bubbles — tiny independent caps. */
+const SIDE_STACK_CAP = 2
 
 export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
   let currentMax = options.maxBubbles ?? 3
@@ -195,7 +217,28 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
     },
   })
 
-  /** One column's vertical stack. Returns nothing; positions elements. */
+  /** Apply a position; the very first one lands without the glide transition. */
+  const place = (entry: BubbleEntry, left: number, top: number): void => {
+    if (!entry.placed) {
+      entry.el.style.transition = 'none'
+      entry.el.style.left = `${left}px`
+      entry.el.style.top = `${top}px`
+      void entry.el.offsetWidth // commit the un-transitioned position
+      entry.el.style.transition = ''
+      entry.el.classList.add('pt-bubble--placed')
+      entry.placed = true
+      return
+    }
+    entry.el.style.left = `${left}px`
+    entry.el.style.top = `${top}px`
+  }
+
+  const clampLeft = (left: number, width: number, view: { width: number }): number => {
+    const half = width / 2
+    return Math.max(half + margin, Math.min(left, view.width - margin - half))
+  }
+
+  /** One column's vertical stack (stats bubbles above the pet). */
   const layoutColumn = (column: BubbleEntry[], centerX: number, anchor: BubbleAnchor, view: { width: number; height: number }): void => {
     const heights = column.map((entry) => entry.el.offsetHeight)
     const total = heights.reduce((sum, height) => sum + height, 0) + gap * Math.max(0, column.length - 1)
@@ -211,11 +254,30 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
       const height = heights[index]
       const top = nextBottom - height
       nextBottom = top - gap
-      entry.el.style.top = `${Math.max(top, margin)}px`
-      const half = entry.el.offsetWidth / 2
-      const left = Math.min(Math.max(centerX, margin + half), view.width - margin - half)
-      entry.el.style.left = `${Math.max(left, half + margin)}px`
+      place(entry, clampLeft(centerX, entry.el.offsetWidth, view), Math.max(top, margin))
     })
+  }
+
+  /** Fixed stack at the pet's LEFT edge, vertically centered, newest nearest. */
+  const layoutLeftStack = (stack: BubbleEntry[], anchor: BubbleAnchor, view: { width: number; height: number }): void => {
+    const heights = stack.map((entry) => entry.el.offsetHeight)
+    const total = heights.reduce((sum, height) => sum + height, 0) + gap * Math.max(0, stack.length - 1)
+    let top = Math.max(margin, anchor.y + anchor.height / 2 - total / 2)
+    stack.forEach((entry, index) => {
+      // Right edge against the pet's left; bubbles are center-anchored, so
+      // left = petLeft - gap - halfWidth.
+      place(entry, clampLeft(anchor.x - gap - entry.el.offsetWidth / 2, entry.el.offsetWidth, view), top)
+      top += heights[index] + gap
+    })
+  }
+
+  /** Fixed stack UNDER the pet, horizontally centered, newest on top. */
+  const layoutBelowStack = (stack: BubbleEntry[], anchor: BubbleAnchor, view: { width: number; height: number }): void => {
+    let top = anchor.y + anchor.height + gap
+    for (const entry of stack) {
+      place(entry, clampLeft(anchor.x + anchor.width / 2, entry.el.offsetWidth, view), Math.min(top, view.height - margin - entry.el.offsetHeight))
+      top += entry.el.offsetHeight + gap
+    }
   }
 
   const layout = (): void => {
@@ -227,24 +289,32 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
     }
     container.style.display = ''
     const view = viewport()
-    // Group by session, newest-first within each column; a session keeps its
-    // column while any of its bubbles (even a fading one) is on stage.
-    const bySession = new Map<string, BubbleEntry[]>()
+    const columns = new Map<string, BubbleEntry[]>()
+    const leftStack: BubbleEntry[] = []
+    const belowStack: BubbleEntry[] = []
     for (const entry of entries) {
-      const column = bySession.get(entry.sessionKey) ?? []
-      column.push(entry)
-      bySession.set(entry.sessionKey, column)
+      if (entry.placement === 'left') leftStack.push(entry)
+      else if (entry.placement === 'below') belowStack.push(entry)
+      else {
+        const column = columns.get(entry.sessionKey) ?? []
+        column.push(entry)
+        columns.set(entry.sessionKey, column)
+      }
     }
-    const sessions = [...bySession.entries()].map(([key, column]) => ({
+    // Columns: focused session above the pet, others flanking — bunched close
+    // (user feedback: far-flung columns read as clutter, not information).
+    const sessions = [...columns.entries()].map(([key, column]) => ({
       key,
       lastActiveAt: Math.max(...column.map((entry) => entry.lastTouchedAt)),
     }))
     const slots = assignColumnSlots(sessions, focusedSession)
-    const stride = Math.max(anchor.width, 160) + 48
-    for (const [key, column] of bySession) {
+    const stride = Math.max(anchor.width / 2 + 110, 150)
+    for (const [key, column] of columns) {
       const slot = slots.get(key) ?? 0
       layoutColumn(column, anchor.x + anchor.width / 2 + slot * stride, anchor, view)
     }
+    layoutLeftStack(leftStack, anchor, view)
+    layoutBelowStack(belowStack, anchor, view)
   }
 
   return {
@@ -254,42 +324,49 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
         handleFor(existing).update(spec.content)
         return handleFor(existing)
       }
+      const placement = spec.placement ?? 'column'
       const style = getBubbleStyle(spec.styleId)
       const enter = getBubbleEnterAnimation(spec.enterAnimationId)
       const exit = getBubbleExitAnimation(spec.exitAnimationId)
       const el = document.createElement('div')
-      el.className = `pt-bubble ${style.className} ${enter.className}`
+      const placementClass = placement === 'column' ? '' : ` pt-bubble--at-${placement}`
+      el.className = `pt-bubble ${style.className} ${enter.className}${placementClass}`
       el.dataset.ptExitAnimation = exit.id
       style.render(el, spec.content)
       container.appendChild(el)
       const entry: BubbleEntry = {
         key: spec.key,
         sessionKey: spec.sessionKey ?? '',
+        placement,
         el,
         style,
         enterClass: enter.className,
         lastTouchedAt: Date.now(),
+        placed: false,
         closing: false,
         closed: false,
         removeTimer: null,
       }
-      // Newest first within its column.
-      const firstOfColumn = entries.findIndex((candidate) => candidate.sessionKey === entry.sessionKey)
-      if (firstOfColumn === -1) entries.unshift(entry)
-      else entries.splice(firstOfColumn, 0, entry)
-      // Evict beyond the per-column cap: oldest live bubble in THAT column.
-      const evictBeyond = (sessionKey: string): void => {
-        const column = entries.filter((candidate) => candidate.sessionKey === sessionKey && !candidate.closing)
-        while (column.length > currentMax) {
-          const victim = column.pop() as BubbleEntry
+      // Newest first within its region.
+      const regionOf = (candidate: BubbleEntry): string =>
+        candidate.placement === 'column' ? `column:${candidate.sessionKey}` : candidate.placement
+      const firstOfRegion = entries.findIndex((candidate) => regionOf(candidate) === regionOf(entry))
+      if (firstOfRegion === -1) entries.unshift(entry)
+      else entries.splice(firstOfRegion, 0, entry)
+      // Evict beyond the region cap: oldest live bubble in THAT region.
+      const evictBeyond = (region: string): void => {
+        const cap = region.startsWith('column:') ? currentMax : SIDE_STACK_CAP
+        const regionEntries = entries.filter((candidate) => regionOf(candidate) === region && !candidate.closing)
+        while (regionEntries.length > cap) {
+          const victim = regionEntries.pop() as BubbleEntry
           handleFor(victim).close()
         }
-        while (entries.filter((candidate) => !candidate.closing).length > currentMax * TOTAL_CAP_MULTIPLIER) {
+        while (entries.filter((candidate) => !candidate.closing).length > currentMax * TOTAL_CAP_MULTIPLIER + SIDE_STACK_CAP * 2) {
           const live = entries.filter((candidate) => !candidate.closing)
           handleFor(live[live.length - 1]).close()
         }
       }
-      evictBeyond(entry.sessionKey)
+      evictBeyond(regionOf(entry))
       layout()
       return handleFor(entry)
     },

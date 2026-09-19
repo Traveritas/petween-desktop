@@ -16,6 +16,8 @@ import { STATS_HUD_ID } from './companion'
 
 interface OptionBag {
   styleId?: string
+  replyStyleId?: string
+  turnStyleId?: string
   enterAnimationId?: string
   exitAnimationId?: string
   multiSession?: boolean
@@ -28,7 +30,7 @@ interface OptionBag {
   editMaxAgeMs?: number
 }
 
-const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'enterAnimationId' | 'exitAnimationId' | 'multiSession' | 'turnSummary' | 'dialogue'>> = {
+const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'replyStyleId' | 'turnStyleId' | 'enterAnimationId' | 'exitAnimationId' | 'multiSession' | 'turnSummary' | 'dialogue'>> = {
   milestoneEveryLines: 0,
   thinkingShowThresholdMs: DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs,
   thinkingHoldMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs,
@@ -107,6 +109,34 @@ export function StatsHudCard(): JSX.Element {
           {listBubbleExitAnimations().map((animation) => (
             <option key={animation.id} value={animation.id}>
               {animation.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div style={rowStyle}>
+        <span className="rowHint">回复样式</span>
+        <select
+          style={selectStyle}
+          value={bag.replyStyleId ?? ''}
+          onChange={(event) => patch({ replyStyleId: event.target.value === '' ? undefined : event.target.value })}
+        >
+          <option value="">同泡泡样式</option>
+          {listBubbleStyles().map((style) => (
+            <option key={style.id} value={style.id}>
+              {style.label}
+            </option>
+          ))}
+        </select>
+        <span className="rowHint">完成样式</span>
+        <select
+          style={selectStyle}
+          value={bag.turnStyleId ?? ''}
+          onChange={(event) => patch({ turnStyleId: event.target.value === '' ? undefined : event.target.value })}
+        >
+          <option value="">同泡泡样式</option>
+          {listBubbleStyles().map((style) => (
+            <option key={style.id} value={style.id}>
+              {style.label}
             </option>
           ))}
         </select>
