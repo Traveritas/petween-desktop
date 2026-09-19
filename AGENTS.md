@@ -83,7 +83,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-19：Phase 11 动画编辑器独立窗口（V1.2 骨架）代码完成**（上游 `4fa4de8`：`/petween-animator/` 自包含工作台页 + static-page 工厂 + animation-draft 共享提取 + AnimatorStore，1057 用例全绿；桌面：animator-window（按需创建/close→hide）+ 托盘/设置双入口 + builder/装配，194 用例全绿；手感升级三批 = Phase 12 scrub/zoom → 13 多选/undo/菜单 → 14 曲线编辑器，详见 docs/05 Phase 11；**真机验收待用户**）。
 - **2026-09-19（晚）：真机反馈修复批全部关闭**——光标闪动三连修（终局：`setIgnoreMouseEvents` 转发的 WH_MOUSE_LL 钩子改为宠物近带常驻（+96/128px 滞回），否则纯穿透零钩子——Electron 已知「flickering cursor」bug 族，`b584192`）；预览穿插（stageBox 收容）；退出报错（destroyed 窗口上读 webContents，捕获引用+守卫，`5bd22c0`）；动画编辑器重构为三栏 DCC 工作台（库|视口+时间轴|属性栏，检查器右栏停靠，上游 `50942a5`）。用户逐项真机复验通过。桌面基线 202 用例。另：用户授权「需要打包时直接 taskkill Petween」。
 - **2026-09-19：Phase 12 手感一批代码完成**（上游 `900f1d6`：sampleTimelineAt 采样预览（与播放逐像素一致）+ PreviewSession.scrubDefinition 直写舞台层 + Ctrl+滚轮光标锚缩放/滚轮平移 + ms 自适应标尺（1-2-5 步进）+ 目标吸附（帧/事件/播放头，Alt 临时禁用，擦洗排除自身）+ Space 播放/停止；TimelineEditor 全部可选 props，V1.1 行为零变化；1088 用例全绿。桌面仅 bump 指针；**真机验收待用户**）。
-- **2026-09-19（泡泡反馈批，v0.2.5）**：用户确认写入泡泡真机正常；思考计时改整秒显示（v0.2.3）；**入场/出场动画拆分为独立选项**（4 入场 × 3 出场 = 12 组合，设置卡双下拉；close 时先摘入场类再加出场类，不依赖级联顺序；旧 `animationId` 存量按 LEGACY_BUNDLED_EXITS 迁移）。202 用例全绿。
+- **2026-09-19（泡泡反馈批，v0.2.5→0.2.6）**：用户确认写入泡泡真机正常；思考计时改整秒显示（v0.2.3）；**入场/出场动画拆分为独立选项**（设置卡双下拉；close 时先摘入场类再加出场类，不依赖级联顺序；旧 `animationId` 存量按 LEGACY_BUNDLED_EXITS 迁移）；「随风」慢淡出出场 + 「飘落」入场一对（出场动画新增 `durationMs`，宿主按其移除元素）。20 种组合，202 用例全绿。
 - petween 基线：64 测试文件 / 1111 用例全绿（`50942a5` = V1.2 工作台 + P12 scrub/zoom + P13 多选/undo + P14 曲线编辑器；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则

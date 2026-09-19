@@ -23,6 +23,8 @@ export interface BubbleExitAnimation {
   label: string
   className: string
   css?: string
+  /** How long the host waits before removing the element (default BUBBLE_EXIT_MS). */
+  durationMs?: number
 }
 
 /** Must cover the longest exit keyframe below. */
@@ -136,6 +138,21 @@ registerBubbleEnterAnimation({
 `,
 })
 
+registerBubbleEnterAnimation({
+  id: 'drift-in',
+  label: '飘落',
+  className: 'pt-bubble-enter-drift-in',
+  css: `
+@keyframes pt-bubble-drift-in {
+  0% { transform: translate(calc(-50% - 6px), -34px) rotate(-2deg); opacity: 0; }
+  45% { transform: translate(calc(-50% + 5px), -14px) rotate(1.4deg); opacity: 0.65; }
+  80% { transform: translate(calc(-50% - 2px), -4px) rotate(-0.5deg); opacity: 0.95; }
+  100% { transform: translate(-50%, 0) rotate(0deg); opacity: 1; }
+}
+.pt-bubble-enter-drift-in { animation: pt-bubble-drift-in 650ms ease-out both; }
+`,
+})
+
 // --- Exit presets -------------------------------------------------------------
 
 registerBubbleExitAnimation({
@@ -172,4 +189,20 @@ registerBubbleExitAnimation({
 }
 .pt-bubble-exit-shrink { animation: pt-bubble-shrink-out 380ms ease-in both; }
 `,
+})
+
+registerBubbleExitAnimation({
+  id: 'drift',
+  label: '随风',
+  className: 'pt-bubble-exit-drift',
+  css: `
+@keyframes pt-bubble-drift-out {
+  0% { transform: translate(-50%, 0) rotate(0deg); opacity: 1; }
+  30% { transform: translate(calc(-50% + 5px), -12px) rotate(1.6deg); opacity: 0.85; }
+  60% { transform: translate(calc(-50% - 4px), -26px) rotate(-1.2deg); opacity: 0.55; }
+  100% { transform: translate(calc(-50% + 3px), -42px) rotate(0.8deg); opacity: 0; }
+}
+.pt-bubble-exit-drift { animation: pt-bubble-drift-out 950ms ease-in-out both; }
+`,
+  durationMs: 1000,
 })

@@ -145,7 +145,7 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
       entry.removeTimer = setTimeout(() => {
         entry.closed = true
         removeEntry(entry)
-      }, BUBBLE_EXIT_MS)
+      }, exit.durationMs ?? BUBBLE_EXIT_MS)
       layout()
     },
   })
