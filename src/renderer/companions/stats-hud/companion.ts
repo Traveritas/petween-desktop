@@ -33,6 +33,8 @@ export interface StatsHudOptions extends HudOptions {
   exitAnimationId?: string
   dialogue?: boolean
   milestoneAnimationId?: string
+  /** Border-to-border gap between columns (px). */
+  columnGapPx?: number
 }
 
 const STATS_POLL_MS = 400
@@ -60,6 +62,7 @@ function normalizeOptions(raw: unknown): StatsHudOptions {
     exitAnimationId: asId(bag.exitAnimationId),
     dialogue: typeof bag.dialogue === 'boolean' ? bag.dialogue : true,
     milestoneAnimationId: asId(bag.milestoneAnimationId) ?? MILESTONE_ANIMATION_DEFAULT,
+    columnGapPx: clampMin(bag.columnGapPx, 24, 0),
     multiSession: typeof bag.multiSession === 'boolean' ? bag.multiSession : true,
     turnSummary: typeof bag.turnSummary === 'boolean' ? bag.turnSummary : true,
     milestoneEveryLines: clampMin(bag.milestoneEveryLines, 0, 0),
@@ -97,6 +100,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
       const timers = new Set<ReturnType<typeof setTimeout>>()
 
       const host = acquireSharedBubbleHost({
+        columnGapPx: options.columnGapPx,
         anchor: () => box,
         viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
       })
@@ -306,6 +310,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
             if (next.exitAnimationId !== undefined && !listBubbleExitAnimations().some((animation) => animation.id === next.exitAnimationId)) {
               next.exitAnimationId = undefined
             }
+            host.setColumnGap(next.columnGapPx ?? 24)
             options = next
           })
           .catch(() => {})

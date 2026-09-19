@@ -65,6 +65,8 @@ export interface BubbleHost {
   setFocusSession(sessionKey: string | null): void
   /** Bubbles per column (total is capped at 3× this). */
   setMaxBubbles(max: number): void
+  /** Border-to-border gap between columns (px, user-adjustable). */
+  setColumnGap(px: number): void
   relayout(): void
   closeAll(): void
   dispose(): void
@@ -73,6 +75,8 @@ export interface BubbleHost {
 export interface BubbleHostOptions {
   anchor(): BubbleAnchor | null
   maxBubbles?: number
+  /** Border-to-border gap between columns (px); default 24. */
+  columnGapPx?: number
   gapPx?: number
   /** Viewport inset the column must respect (CSS px). */
   marginPx?: number
@@ -96,18 +100,14 @@ interface BubbleEntry {
 }
 
 /**
- * Column slots: focused session → 0 (above the pet); the rest sorted by
- * recency. With room information the sides are chosen by AVAILABLE SPACE
- * (each column goes to whichever side has more room left) — a pet parked at
- * a screen edge gets ALL side columns on its inward side instead of having
- * the outward ones viewport-clamped on top of itself (verified live, v0.3.1
- * feedback round). Without room info the classic alternation applies.
+ * Column slots: focused session → 0; the rest sorted by recency alternate
+ * outward (-1, +1, -2, +2 …). Slots only decide ORDER inside the band —
+ * actual x positions come from packColumnBand (edge-packed, pet-centered).
  * Pure so the layout is unit-testable.
  */
 export function assignColumnSlots(
   sessions: ReadonlyArray<{ key: string; lastActiveAt: number }>,
   focused: string | null,
-  room?: { leftPx: number; rightPx: number; stridePx: number },
 ): Map<string, number> {
   const slots = new Map<string, number>()
   if (sessions.length === 0) return slots
@@ -116,34 +116,49 @@ export function assignColumnSlots(
   slots.set(focus, 0)
   let nextNegative = -1
   let nextPositive = 1
-  let left = room?.leftPx ?? Infinity
-  let right = room?.rightPx ?? Infinity
-  const stride = room?.stridePx ?? 0
   for (const entry of ordered) {
     if (entry.key === focus) continue
-    let useLeft: boolean
-    if (room === undefined) {
-      // No room info: classic left-first alternation.
-      useLeft = -nextNegative <= nextPositive
-    } else {
-      const fitsLeft = left >= stride
-      const fitsRight = right >= stride
-      if (fitsLeft && fitsRight) useLeft = left >= right
-      else if (fitsLeft) useLeft = true
-      else if (fitsRight) useLeft = false
-      else useLeft = left >= right // nothing fits: pile onto the roomier side
-    }
-    if (useLeft) {
+    if (-nextNegative <= nextPositive) {
       slots.set(entry.key, nextNegative)
       nextNegative -= 1
-      left -= stride
     } else {
       slots.set(entry.key, nextPositive)
       nextPositive += 1
-      right -= stride
     }
   }
   return slots
+}
+
+/**
+ * Pack all columns edge-to-edge with a fixed border gap and CENTER THE BAND
+ * on the pet (user spec, v0.3.3): no pet-width term in the spacing, and if
+ * the band overflows the viewport the whole band shifts inward (staying in
+ * bounds wins over perfect centering). Returns column center x per key.
+ * Pure so the geometry is unit-testable.
+ */
+export function packColumnBand(
+  columns: ReadonlyArray<{ key: string; width: number; slot: number }>,
+  petCenterX: number,
+  gap: number,
+  viewportWidth: number,
+  margin: number,
+): Map<string, number> {
+  const centers = new Map<string, number>()
+  if (columns.length === 0) return centers
+  const ordered = [...columns].sort((a, b) => a.slot - b.slot)
+  const total =
+    ordered.reduce((sum, column) => sum + column.width, 0) + gap * (ordered.length - 1)
+  const maxX = viewportWidth - margin - total
+  const startX =
+    maxX < margin
+      ? margin // band wider than the viewport: anchor left, stay in bounds
+      : Math.min(Math.max(petCenterX - total / 2, margin), maxX)
+  let cursor = startX
+  for (const column of ordered) {
+    centers.set(column.key, cursor + column.width / 2)
+    cursor += column.width + gap
+  }
+  return centers
 }
 
 const BASE_CSS = `
@@ -173,6 +188,7 @@ const SIDE_STACK_CAP = 2
 
 export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
   let currentMax = options.maxBubbles ?? 3
+  let columnGap = options.columnGapPx ?? 24
   const gap = options.gapPx ?? 6
   const margin = options.marginPx ?? 6
   let focusedSession: string | null = null
@@ -321,24 +337,23 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
         columns.set(entry.sessionKey, column)
       }
     }
-    // Columns: focused session above the pet, others flanking — bunched close
-    // (user feedback: far-flung columns read as clutter, not information) and
-    // room-aware: a pet near a screen edge sends every side column inward
-    // (viewport clamping used to press them onto the pet — verified live).
+    // Columns: one band, edge-packed with a fixed border gap, the whole band
+    // centered on the pet and shifted inward when it would overflow (user
+    // spec v0.3.3 — no pet-width term; slots only set the order, focus mid).
     const sessions = [...columns.entries()].map(([key, column]) => ({
       key,
       lastActiveAt: Math.max(...column.map((entry) => entry.lastTouchedAt)),
     }))
     const petCenterX = anchor.x + anchor.width / 2
-    const stride = Math.max(anchor.width / 2 + 110, 150)
-    const slots = assignColumnSlots(sessions, focusedSession, {
-      leftPx: petCenterX - margin,
-      rightPx: view.width - margin - petCenterX,
-      stridePx: stride,
-    })
+    const slots = assignColumnSlots(sessions, focusedSession)
+    const band = [...columns.entries()].map(([key, column]) => ({
+      key,
+      slot: slots.get(key) ?? 0,
+      width: Math.max(...column.map((entry) => entry.el.offsetWidth)),
+    }))
+    const centers = packColumnBand(band, petCenterX, columnGap, view.width, margin)
     for (const [key, column] of columns) {
-      const slot = slots.get(key) ?? 0
-      layoutColumn(column, petCenterX + slot * stride, anchor, view)
+      layoutColumn(column, centers.get(key) ?? petCenterX, anchor, view)
     }
     layoutLeftStack(leftStack, anchor, view)
     layoutBelowStack(belowStack, anchor, view)
@@ -406,6 +421,11 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
     setFocusSession(sessionKey) {
       if (focusedSession === sessionKey) return
       focusedSession = sessionKey
+      layout()
+    },
+
+    setColumnGap(px) {
+      columnGap = Math.max(0, px)
       layout()
     },
 

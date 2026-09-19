@@ -24,6 +24,7 @@ interface OptionBag {
   turnSummary?: boolean
   dialogue?: boolean
   milestoneEveryLines?: number
+  columnGapPx?: number
   thinkingShowThresholdMs?: number
   thinkingHoldMs?: number
   editHoldMs?: number
@@ -32,6 +33,7 @@ interface OptionBag {
 
 const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'replyStyleId' | 'turnStyleId' | 'enterAnimationId' | 'exitAnimationId' | 'multiSession' | 'turnSummary' | 'dialogue'>> = {
   milestoneEveryLines: 0,
+  columnGapPx: 24,
   thinkingShowThresholdMs: DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs,
   thinkingHoldMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs,
   editHoldMs: DEFAULT_HUD_OPTIONS.editHoldMs,
@@ -175,6 +177,18 @@ export function StatsHudCard(): JSX.Element {
           step={50}
           value={bag.milestoneEveryLines ?? 0}
           onChange={(event) => patch({ milestoneEveryLines: Number(event.target.value) })}
+          style={{ width: 80 }}
+        />
+      </div>
+      <div style={rowStyle}>
+        <span className="rowHint">列间距（px，相邻列边框最近距离）</span>
+        <input
+          type="number"
+          min={0}
+          max={200}
+          step={4}
+          value={bag.columnGapPx ?? 24}
+          onChange={(event) => patch({ columnGapPx: Number(event.target.value) })}
           style={{ width: 80 }}
         />
       </div>

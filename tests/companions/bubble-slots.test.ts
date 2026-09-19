@@ -3,7 +3,7 @@
  * by recency (left first). Pure function, no DOM.
  */
 import { describe, expect, it } from 'vitest'
-import { assignColumnSlots } from '../../src/renderer/companions/bubbles/bubble-host'
+import { assignColumnSlots, packColumnBand } from '../../src/renderer/companions/bubbles/bubble-host'
 
 describe('assignColumnSlots', () => {
   it('focused session gets the center column, others flank by recency', () => {
@@ -40,36 +40,46 @@ describe('assignColumnSlots', () => {
   })
 })
 
-describe('assignColumnSlots with room (pet near a screen edge)', () => {
-  const sessions = [
-    { key: 'old', lastActiveAt: 1 },
-    { key: 'focus', lastActiveAt: 5 },
-    { key: 'mid', lastActiveAt: 3 },
-    { key: 'new', lastActiveAt: 9 },
+describe('packColumnBand (edge-packed, pet-centered, clamp-first)', () => {
+  const cols = [
+    { key: 'a', width: 100, slot: -1 },
+    { key: 'focus', width: 100, slot: 0 },
+    { key: 'b', width: 100, slot: 1 },
   ]
 
-  it('all side columns go inward when one side has no room', () => {
-    // Pet parked at the right edge: 1800px left, 50px right.
-    const slots = assignColumnSlots(sessions, 'focus', { leftPx: 1800, rightPx: 50, stridePx: 200 })
-    expect(slots.get('focus')).toBe(0)
-    expect(slots.get('new')).toBe(-1)
-    expect(slots.get('mid')).toBe(-2)
-    expect(slots.get('old')).toBe(-3)
+  it('centers the whole band on the pet with exact border gaps', () => {
+    const centers = packColumnBand(cols, 1000, 24, 2048, 6)
+    // total = 300 + 2*24 = 348 → startX = 1000 - 174 = 826
+    expect(centers.get('a')).toBe(876)
+    expect(centers.get('focus')).toBe(1000)
+    expect(centers.get('b')).toBe(1124)
   })
 
-  it('balances both sides when both have room', () => {
-    const slots = assignColumnSlots(sessions, 'focus', { leftPx: 1000, rightPx: 1200, stridePx: 200 })
-    // new → right (1200>1000, right 1000); mid → right again? left(1000) vs right(1000) → tie goes LEFT (left>=right).
-    expect(slots.get('new')).toBe(1)
-    expect(slots.get('mid')).toBe(-1)
-    expect(slots.get('old')).toBe(2) // left 800 vs right 1000 → right (+2)
+  it('shifts the band inward when it would overflow the viewport', () => {
+    // pet near the right edge: centered start would run off-screen.
+    const centers = packColumnBand(cols, 1900, 24, 2048, 6)
+    const startX = Math.min(Math.max(1900 - 174, 6), 2048 - 6 - 348) // = 1694
+    expect(centers.get('a')).toBe(startX + 50)
+    expect(centers.get('focus')).toBe(startX + 174)
+    expect(centers.get('b')).toBe(startX + 298)
+    // every column fully inside the viewport
+    for (const center of centers.values()) {
+      expect(center - 50).toBeGreaterThanOrEqual(6)
+      expect(center + 50).toBeLessThanOrEqual(2048 - 6)
+    }
   })
 
-  it('spills to the roomier side when the tight side runs out', () => {
-    const slots = assignColumnSlots(sessions, 'focus', { leftPx: 500, rightPx: 2000, stridePx: 200 })
-    // new: right (2000>500) → +1 (right 1800); mid: right again (1800>500) → +2; old: right (1600>500) → +3.
-    expect(slots.get('new')).toBe(1)
-    expect(slots.get('mid')).toBe(2)
-    expect(slots.get('old')).toBe(3)
+  it('anchors left when the band is wider than the viewport', () => {
+    const wide = [
+      { key: 'w1', width: 1100, slot: -1 },
+      { key: 'w2', width: 1100, slot: 0 },
+    ]
+    const centers = packColumnBand(wide, 1000, 24, 2048, 6)
+    expect(centers.get('w1')).toBe(556) // startX = 6 → 6 + 550
+    expect(centers.get('w2')).toBe(6 + 1100 + 24 + 550)
+  })
+
+  it('empty input yields no centers', () => {
+    expect(packColumnBand([], 500, 24, 1000, 6).size).toBe(0)
   })
 })
