@@ -18,6 +18,7 @@ import { AssetStore } from 'petween/host/assets'
 import { ConfigStore } from 'petween/host/config'
 import { ConfigViewStore } from 'petween/host/view-store'
 import { createWriteLock } from 'petween/host/storage'
+import { registerAnimatorPage } from 'petween/host/animator-page'
 import { registerEditorPage } from 'petween/host/editor-page'
 import { PetsStore } from 'petween/host/pets'
 import { planMotionPackImport } from 'petween/host/packs'
@@ -34,6 +35,8 @@ export interface LocalServerOptions {
   dataRoot: string
   /** Absolute path to the prebuilt vendor/petween/lib/editor.js. */
   editorBundlePath: string
+  /** Absolute path to the prebuilt vendor/petween/lib/animator.js (Phase 11). */
+  animatorBundlePath: string
   /**
    * electron-vite renderer build dir (out/renderer). When set, the server
    * also serves the overlay page + hashed assets so the prod overlay window
@@ -112,10 +115,13 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
 
   const table = createRouteTable()
   const disposeRoutes = registerRoutes(table.host, deps)
-  // Deep-imported host code cannot resolve lib/editor.js via import.meta.url
-  // (it points into vendor/petween/src) — the bundle loader must be injected.
+  // Deep-imported host code cannot resolve lib/*.js via import.meta.url
+  // (it points into vendor/petween/src) — the bundle loaders must be injected.
   const disposeEditor = registerEditorPage(table.host, {
     loadBundle: () => readFile(options.editorBundlePath),
+  })
+  const disposeAnimator = registerAnimatorPage(table.host, {
+    loadBundle: () => readFile(options.animatorBundlePath),
   })
   const disposeOverlayStatic =
     options.rendererDistDir === undefined
@@ -145,6 +151,7 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
       closed = true
       return new Promise<void>((resolve, reject) => {
         stateChannel.dispose()
+        disposeAnimator()
         disposeEditor()
         disposeOverlayStatic?.()
         disposeRoutes()

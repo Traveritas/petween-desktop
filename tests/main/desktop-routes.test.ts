@@ -16,6 +16,7 @@ let base: string
 let dispose: () => void
 
 const fixInteraction = vi.fn()
+const openAnimator = vi.fn()
 const setAutoLaunch = vi.fn()
 const probeDsh = vi.fn()
 
@@ -31,6 +32,7 @@ beforeEach(async () => {
       serverOrigin: 'http://127.0.0.1:19999',
     }),
     fixInteraction,
+    openAnimator,
     getAutoLaunch: () => true,
     setAutoLaunch,
     probeDsh: probeDsh as unknown as (port: number) => Promise<{ version: string } | null>,
@@ -47,6 +49,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await new Promise((resolve) => server.close(resolve))
   fixInteraction.mockClear()
+  openAnimator.mockClear()
   setAutoLaunch.mockClear()
   probeDsh.mockClear()
 })
@@ -116,6 +119,23 @@ describe('status / autolaunch / fix-interaction / dsh-test', () => {
     const res = await fetch(`${base}/api/petween-desktop/fix-interaction`, { method: 'POST' })
     expect(res.status).toBe(200)
     expect(fixInteraction).toHaveBeenCalledTimes(1)
+  })
+
+  it('open-animator invokes the shell handler and is write-fenced', async () => {
+    const res = await fetch(`${base}/api/petween-desktop/open-animator`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    expect(openAnimator).toHaveBeenCalledTimes(1)
+
+    // The browser-page write fence: a cross-site POST never reaches the handler.
+    const cross = await fetch(`${base}/api/petween-desktop/open-animator`, {
+      method: 'POST',
+      headers: { 'sec-fetch-site': 'cross-site' },
+    })
+    expect(cross.status).toBe(403)
+    expect(openAnimator).toHaveBeenCalledTimes(1)
+
+    const bad = await fetch(`${base}/api/petween-desktop/open-animator`)
+    expect(bad.status).toBe(405)
   })
 
   it('dsh-test probes the requested port', async () => {

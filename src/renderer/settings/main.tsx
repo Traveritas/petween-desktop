@@ -521,6 +521,14 @@ function App(): JSX.Element {
   const status = useStatus()
   const [active, setActive] = useState<Section>('connect')
 
+  // Phase 11: open the standalone animator window (main-side capability;
+  // failure is surfaced in the console — the window itself is the feedback).
+  const openAnimator = (): void => {
+    void api('/api/petween-desktop/open-animator', { method: 'POST' }).catch((error: unknown) =>
+      console.error('open-animator failed', error),
+    )
+  }
+
   if (settings === null) {
     return <div className="loading">加载设置…</div>
   }
@@ -543,7 +551,13 @@ function App(): JSX.Element {
       <main className="content">
         {/* The pet section stays mounted (visibility toggling) so the embedded
             editor keeps its state and any dirty draft across section switches. */}
-        <div className={`pane ${active === 'pet' ? 'visible' : 'hidden'}`}>
+        <div className={`pane petPane ${active === 'pet' ? 'visible' : 'hidden'}`}>
+          <div className="petToolbar">
+            <span className="petToolbarHint">宠物 / 图片 / 姿势在此编辑；时间轴动画工作在独立窗口进行。</span>
+            <button type="button" onClick={openAnimator}>
+              ⏱ 打开动画编辑器
+            </button>
+          </div>
           {status !== null && (
             <iframe className="editorFrame" title="Petween 编辑器" src={`${status.serverOrigin}/petween-editor/`} />
           )}

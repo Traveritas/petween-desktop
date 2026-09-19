@@ -22,6 +22,8 @@ export interface DesktopRoutesDeps {
   settings: DesktopSettingsStore
   status(): DesktopStatus
   fixInteraction(): void
+  /** Opens the standalone animator window (Phase 11); a shell-side capability. */
+  openAnimator(): void
   getAutoLaunch(): boolean
   setAutoLaunch(enabled: boolean): void
   probeDsh(port: number): Promise<{ version: string } | null>
@@ -165,6 +167,16 @@ export function registerDesktopRoutes(
       return
     }
     sendJson(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'expected GET or PUT' } })
+  })
+
+  exact('/api/petween-desktop/open-animator', (req, res) => {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'expected POST' } })
+      return
+    }
+    if (fence(req, res)) return
+    deps.openAnimator()
+    sendJson(res, 200, { ok: true })
   })
 
   exact('/api/petween-desktop/fix-interaction', (req, res) => {

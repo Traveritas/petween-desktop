@@ -39,7 +39,7 @@ describe('buildTrayTemplate', () => {
     expect(on.some((item) => item.action === 'import-from-dsh')).toBe(false)
   })
 
-  it('always keeps settings and quit entries', () => {
+  it('always keeps settings, animator and quit entries', () => {
     const template = buildTrayTemplate({
       dshConnected: false,
       autoLaunchEnabled: false,
@@ -47,6 +47,7 @@ describe('buildTrayTemplate', () => {
       canImportFromDsh: false,
     })
     expect(template.some((item) => item.action === 'open-settings')).toBe(true)
+    expect(template.some((item) => item.action === 'open-animator')).toBe(true)
     expect(template.some((item) => item.action === 'quit')).toBe(true)
   })
 })

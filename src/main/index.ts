@@ -12,6 +12,7 @@ import { app, dialog, globalShortcut } from 'electron'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { openAnimatorWindow } from './animator-window'
 import { DEV_LOCAL_PORT } from './dev-port'
 import { createZcodeConnector } from './connectors/zcode-connector'
 import { createStatsLedger } from './connectors/stats-ledger'
@@ -122,6 +123,8 @@ async function bootstrap(): Promise<void> {
   const dataRoot = join(app.getPath('userData'), 'petween-home')
   const editorBundlePath =
     process.env.PETWEEN_EDITOR_BUNDLE ?? join(app.getAppPath(), 'vendor', 'petween', 'lib', 'editor.js')
+  const animatorBundlePath =
+    process.env.PETWEEN_ANIMATOR_BUNDLE ?? join(app.getAppPath(), 'vendor', 'petween', 'lib', 'animator.js')
   const port = process.env.PETWEEN_LOCAL_PORT
     ? Number.parseInt(process.env.PETWEEN_LOCAL_PORT, 10)
     : isDev
@@ -134,6 +137,7 @@ async function bootstrap(): Promise<void> {
   server = await startPetweenLocalServer({
     dataRoot,
     editorBundlePath,
+    animatorBundlePath,
     // Prod serves the built overlay/settings pages from the local-server (same origin).
     rendererDistDir: isDev ? undefined : join(__dirname, '../renderer'),
     port,
@@ -160,6 +164,14 @@ async function bootstrap(): Promise<void> {
   }
   openSettings = openSettingsWindowNow
 
+  // Phase 11: the standalone animation workbench window (on-demand,
+  // close→hide — the timeline draft survives the close).
+  const openAnimatorWindowNow = (): void => {
+    if (server !== null) {
+      openAnimatorWindow({ serverPort: server.port }, { shouldHideOnClose: () => !isQuitting })
+    }
+  }
+
   const trayState = (): TrayMenuState => ({
     dshConnected: dshStatus.connected,
     autoLaunchEnabled: getAutoLaunch(),
@@ -171,6 +183,9 @@ async function bootstrap(): Promise<void> {
       switch (action) {
         case 'open-settings':
           openSettingsWindowNow()
+          break
+        case 'open-animator':
+          openAnimatorWindowNow()
           break
         case 'toggle-auto-launch':
           setAutoLaunch(!getAutoLaunch())
@@ -196,6 +211,7 @@ async function bootstrap(): Promise<void> {
       serverOrigin: `http://127.0.0.1:${server?.port ?? 0}`,
     }),
     fixInteraction: () => pointerThrough?.fixNow(),
+    openAnimator: openAnimatorWindowNow,
     getAutoLaunch,
     setAutoLaunch,
     probeDsh: describeDsh,

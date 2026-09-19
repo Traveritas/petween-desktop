@@ -302,6 +302,35 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 
 多会话泡泡动态排布（多列/避让策略）、完成提醒泡泡、对话泡泡（独立 companion，复用 BubbleHost；数据走 transcript 尾读）、里程碑触发宠物本体动画（`playAnimation` 接口已通）。
 
+## Phase 11：动画编辑器独立窗口（V1.2 工作台骨架，2026-09-19 代码完成；真机验收待用户）
+
+用户需求（2026-09-19 拍板）：动画编辑器独立成**按需启动的专用窗口**，编辑手感最终对标游戏引擎时间轴；上游可同步开发。总计划 = Phase 11 骨架 + Phase 12 scrub/zoom 手感批 + Phase 13 多选/undo/菜单批 + Phase 14 曲线编辑器批（每批上游 commit→push→bump→真机验收）。本 Phase 交付**骨架 + 独立窗口**。
+
+### 设计定案（计划审批默认拍板，AskUserQuestion 未获回复时采用推荐项）
+
+1. **独立页面而非复用设置页**：上游新增 `/petween-animator/`（工作台布局：左动画库 | 中标量表单 + 320px 试播 | 下全宽时间轴 + JSON 视图），自包含 IIFE `lib/animator.js`；DSH 侧纯增量路由（URL 可达、设置弹窗不加入口），宠物/图片/姿势管理仍在设置编辑器。
+2. **窗口模式 = settings 同款**：按需创建（首次打开才建窗）、close→hide 保草稿、退出才销毁；托盘「动画编辑器…」+ 设置页「宠物」分区工具条按钮双入口（`POST /api/petween-desktop/open-animator`，跨源写栅栏照旧）。
+3. **上游零分叉纪律**：`editor-page.ts` 骨架泛化为 `static-page.ts#createStaticPageRoute`（`registerEditorPage` 签名不变，桌面装配零改动）；AnimationLibrary 纯函数草稿层提取到 `client/timeline/animation-draft.ts` 两页共用（行为零变化）；animator 编辑状态入 `AnimatorStore`（纯 TS，后续批扩 playhead/zoom/多选/undo）。
+4. **数据格式与既有 UX 冻结**：动画 schema/at 归一化契约不动；设置页动画库与桌面 iframe 编辑器行为不变（后续手感升级只落 animator 页）。
+
+### 实现
+
+- 上游（`4fa4de8`，58 文件/1057 用例全绿）：`static-page.ts` 工厂 + `animator-page.ts`；`src/animator/`（入口/AnimatorPage/AnimatorStore/CSS）；tsdown 第 5 配置；`src/index.ts` 注册；测试 +animator-page/+animator-store/+animator-entry、ALL_ROUTES 追加；implementation-notes 追记。
+- 桌面：`animator-window.ts`（单例 + close→hide + 直连 local-server URL，dev/prod 同路，无 preload）；`local-server.ts` 加 `animatorBundlePath`（env `PETWEEN_ANIMATOR_BUNDLE` 可覆盖）+ 注册；`desktop-routes.ts` 加 open-animator 路由；tray 菜单加「动画编辑器…」；设置页宠物分区加工具条（提示文案 + 按钮）；electron-builder files 纳入 `vendor/petween/lib/animator.js`。
+- 测试：桌面 194 用例全绿（+animator-window 6：单例/URL/close-hide/quit 直通/销毁重建/sandbox 断言；local-server 装配断言真 bundle；desktop-routes open-animator + 写栅栏；tray 菜单项）。
+
+### 验收
+
+- [x] 上游 1057 + 桌面 194 用例全绿，双 typecheck 零错误；animator bundle 产物 505KB（gzip 130KB）
+- [ ] 真机（dev 或 dist）：托盘/设置按钮打开独立窗口；库/表单/时间轴/试播/JSON/保存/删除/克隆全可用；关闭重开草稿保留；设置页 iframe 编辑器不受影响；退出时窗口正常销毁
+- [ ] prod 打包冒烟（dist:win 后 asar 内 animator.js 伺服正常）
+
+### 后续（本窗口手感升级批次）
+
+- Phase 12：scrub 擦洗 + 采样预览（`sampleTimelineAt` 绕过 director 直应用）+ zoom/pan + ms 自适应时间轴 + 吸附升级（帧/事件/播放头 + Alt 临时禁用）
+- Phase 13：多选/框选/批量拖动 + undo/redo（手势级快照栈）+ 右键菜单 + 快捷键全集
+- Phase 14：单段 cubic-bezier 曲线编辑器（KeyframeInspector 内嵌画布）+ 上游护栏措辞修订（§2.2/§6：排除多段曲线轨道全集，允许单段手柄）
+
 ## 待用户拍板项
 
 - [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）

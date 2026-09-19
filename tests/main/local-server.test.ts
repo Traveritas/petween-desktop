@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startPetweenLocalServer, type PetweenLocalServer } from '../../src/main/local-server'
 
 const editorBundlePath = fileURLToPath(new URL('../../vendor/petween/lib/editor.js', import.meta.url))
+const animatorBundlePath = fileURLToPath(new URL('../../vendor/petween/lib/animator.js', import.meta.url))
 
 /** Minimal valid 1x1 PNG — the host sniffs magic bytes + IHDR only. */
 const PNG_1X1 = Buffer.from(
@@ -32,7 +33,7 @@ let base: string
 
 beforeAll(async () => {
   dataRoot = await mkdtemp(join(tmpdir(), 'petween-desktop-'))
-  server = await startPetweenLocalServer({ dataRoot, editorBundlePath })
+  server = await startPetweenLocalServer({ dataRoot, editorBundlePath, animatorBundlePath })
   base = `http://127.0.0.1:${server.port}`
 })
 
@@ -70,6 +71,21 @@ describe('local-server endpoints', () => {
     expect(bytes.byteLength).toBeGreaterThan(100_000) // the real lib/editor.js, not a stub
   })
 
+  it('serves the animator page (Phase 11) with the real prebuilt bundle', async () => {
+    const page = await fetch(`${base}/petween-animator/`)
+    expect(page.status).toBe(200)
+    expect(page.headers.get('content-type')).toContain('text/html')
+    const html = await page.text()
+    expect(html).toContain('<title>Petween 动画编辑器</title>')
+    expect(html).toContain('client.js')
+
+    const bundle = await fetch(`${base}/petween-animator/client.js`)
+    expect(bundle.status).toBe(200)
+    expect(bundle.headers.get('content-type')).toContain('text/javascript')
+    const bytes = await bundle.arrayBuffer()
+    expect(bytes.byteLength).toBeGreaterThan(100_000) // the real lib/animator.js, not a stub
+  })
+
   it('uploads an asset, lists it in the config view and serves its bytes', async () => {
     const upload = await fetch(`${base}/api/petween/assets`, {
       method: 'POST',
@@ -91,7 +107,7 @@ describe('local-server endpoints', () => {
 
   it('keeps data across a server restart on the same root (independent dir)', async () => {
     await server.close()
-    const rebooted = await startPetweenLocalServer({ dataRoot, editorBundlePath })
+    const rebooted = await startPetweenLocalServer({ dataRoot, editorBundlePath, animatorBundlePath })
     try {
       expect(rebooted.port).not.toBe(server.port) // prod uses random ports
       const config = await fetch(`http://127.0.0.1:${rebooted.port}/api/petween/config`)

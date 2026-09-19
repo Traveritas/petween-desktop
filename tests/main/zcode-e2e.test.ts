@@ -21,6 +21,7 @@ import { startPetweenLocalServer, type PetweenLocalServer } from '../../src/main
 
 const CURL = 'C:/Windows/System32/curl.exe'
 const editorBundlePath = fileURLToPath(new URL('../../vendor/petween/lib/editor.js', import.meta.url))
+const animatorBundlePath = fileURLToPath(new URL('../../vendor/petween/lib/animator.js', import.meta.url))
 const SESSION = 'sess_e2e-0000-0000-0000-000000000000'
 
 let hasCurl = true
@@ -41,7 +42,7 @@ describe.skipIf(!hasCurl)('zcode connector transport (curl → route → relay �
   beforeAll(async () => {
     dataRoot = await mkdtemp(join(tmpdir(), 'petween-zcode-e2e-'))
     cfgDir = await mkdtemp(join(tmpdir(), 'petween-zcode-cfg-'))
-    server = await startPetweenLocalServer({ dataRoot, editorBundlePath })
+    server = await startPetweenLocalServer({ dataRoot, editorBundlePath, animatorBundlePath })
     base = `http://127.0.0.1:${server.port}`
     // Exactly what src/main/index.ts writes at every boot.
     await writeZcodeHookConfigs(cfgDir, server.port)

@@ -3,7 +3,7 @@
  * IDs (no Electron imports) so the checked/label states are unit-testable;
  * tray.ts maps the IDs to handlers.
  */
-export type TrayAction = 'open-settings' | 'toggle-auto-launch' | 'import-from-dsh' | 'quit'
+export type TrayAction = 'open-settings' | 'open-animator' | 'toggle-auto-launch' | 'import-from-dsh' | 'quit'
 
 export interface TrayMenuState {
   dshConnected: boolean
@@ -27,6 +27,7 @@ export function buildTrayTemplate(state: TrayMenuState): TrayTemplateItem[] {
     { label: state.dshConnected ? 'DSH：已连接' : 'DSH：未连接', enabled: false },
     { type: 'separator' },
     { label: '打开设置…', action: 'open-settings' },
+    { label: '动画编辑器…', action: 'open-animator' },
     {
       label: '开机自启',
       type: 'checkbox',
