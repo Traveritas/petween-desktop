@@ -45,6 +45,11 @@ import { createOverlayWindow, loadOverlayPage } from './overlay-window'
 import { openSettingsWindow } from './settings-window'
 import { createPetweenTray } from './tray'
 import type { TrayMenuState } from './tray-menu'
+import { installStdoutEpipeGuard } from './stdout-epipe-guard'
+
+// Before any logging: a dead inherited console pipe must not turn console.log
+// into a dialog-spamming uncaught exception (see stdout-epipe-guard.ts).
+installStdoutEpipeGuard()
 
 const RESCUE_HOTKEY_CANDIDATES = ['Control+Alt+P', 'Control+Alt+I', 'Control+Alt+U']
 

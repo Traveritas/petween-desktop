@@ -384,6 +384,10 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 
 用户报拖动宠物时其他应用动画全停、点到前台才恢复。**根因不是卡死，是 Chromium 原生窗口遮挡检测暂停渲染**：`setIgnoreMouseEvents(false)`（悬停/拖拽的 interactive 态）会把 `WS_EX_TRANSPARENT|WS_EX_LAYERED` 一起摘掉（electron `native_window_views.cc` SetIgnoreMouseEvents，内部 `layered_` 标志仅调过 setOpacity 才置位），全屏置顶窗于是满足 Chromium `IsWindowVisibleAndFullyOpaque`（`ui/gfx/win/hwnd_util.cc`）的"完全不透明遮挡者"条件，底下所有 Chromium/CEF 应用 PageVisibility=hidden、rAF/动画全停；而样式恢复走裸 `SetWindowLong`（静默、不产生 WinEvent），被冻结窗口又会被移出 LOCATIONCHANGE 钩子集合——光标划过救不活，只有 `EVENT_SYSTEM_FOREGROUND`（点击切前台）触发重算。修复 = overlay 创建后一次性 `setOpacity(254/255)`：置位 `layered_` 并设 LWA_ALPHA≈253，此后所有穿透模式保留 `WS_EX_LAYERED`，layered+alpha<255 在遮挡判定中永不算遮挡者；99.2% 不透明度不可感知。隔离实验（右下角 46s，rig 在 zcode exec/occl-test）：模拟窗 interactive 无 layered → 受害者窗 0.7s 内 hidden、rAF 冻 9.5s；setOpacity 后仍 interactive → 1.1s 恢复、透明像素无黑块、`layered_` 在后续模式切换中保留。顺带治好"悬停宠物期间其他应用短暂冻结"。235 壳层用例全绿（+overlay-window 2）。**真机验收待用户**：拖宠物时旁观应用（浏览器视频/动效）不再停。
 
+### 真机反馈追加（2026-09-19，v0.3.14：EPIPE 弹窗刷屏防护）
+
+自动化复验期间以 bash 后台方式重启应用，bash 会话退出后继承的 stdout 管道断裂——主进程每次 console.log（穿透状态切换、DSH 桥重试循环都会打）抛 `EPIPE: broken pipe, write` 未捕获异常，"A JavaScript error occurred in the main process" 弹窗持续刷屏（用户真机遇到）。任何"宿主控制台先于应用死亡"的启动方式（后台脚本、计划任务、服务包装器）都会踩中。修复 = `stdout-epipe-guard.ts`：入口最先给 process.stdout/stderr 挂 'error' 监听，EPIPE 静默（控制台已亡、无处可报）、其余错误码照抛。教训（已入 agent 记忆）：给用户重启 GUI 应用必须用 `Start-Process` 脱离启动，不得挂 bash 会话管道。239 用例全绿（+guard 4）。
+
 ### 后置项
 
 **小窗化架构（方案 C）难度评估（2026-09-19，遮挡修复 v0.3.13 之后）**：用户要求评估。动机核查——A 修复治好遮挡冻结后，C 的剩余收益只有两条：①悬停宠物期间全屏窗吃掉全屏点击（窗口级交互切换的固有代价，拖拽期间鼠标捕获在任何架构下都存在）；②宠物邻带转发钩子（LL hook，已有设置项可整体关闭）。**全量 C**（单一动态边界小窗承载宠物+泡泡）：泡泡列带以宠物居中、多会话时宽度可近全屏且依赖视口钳制（packColumnBand/上下翻转）；物理飞行为 rAF 逐帧移动宠物（viewport=屏幕 DIP，地面/碰撞/§27 钳制全绑 `window.innerWidth/innerHeight`）——小窗化需要内容边界协商循环（渲染测联合区域→main setBounds→重锚定）+ 虚拟视口适配层（否则上游 petween 视口语义分叉）；v0.3.0~v0.3.12 十三批泡泡特性全部按全屏坐标验收，回归面大。估 2~3 个 Phase。**C-lite**（宠物矩形小窗交互 + 全屏层永久纯穿透只渲染泡泡/粒子）：穿透状态机/光标轮询/救援热键大半可删，估 1 个 Phase；主要风险 = 拖拽与飞行期间逐帧 `setBounds` 的移动平滑度（透明窗移动历史上有闪烁问题，需先 spike）、两 topmost 窗 z 序维护、宠物屏幕坐标跨窗同步。结论：边际收益低，搁置；重开触发 = 用户明确不能容忍"悬停宠物期间点击被全屏窗吃掉"或钩子残留问题。
