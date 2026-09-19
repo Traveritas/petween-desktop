@@ -372,7 +372,11 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
       const exit = getBubbleExitAnimation(spec.exitAnimationId)
       const el = document.createElement('div')
       const placementClass = placement === 'column' ? '' : ` pt-bubble--at-${placement}`
-      el.className = `pt-bubble ${style.className} ${enter.className}${placementClass}`
+      // Content-kind class: skins refine their shape per kind (a pill suits a
+      // short chip, not a paragraph — user feedback v0.3.7). A bubble's kind
+      // never changes after spawn.
+      const kindClass = ` pt-bubble--kind-${spec.content.kind}`
+      el.className = `pt-bubble ${style.className} ${enter.className}${placementClass}${kindClass}`
       el.dataset.ptExitAnimation = exit.id
       style.render(el, spec.content)
       container.appendChild(el)

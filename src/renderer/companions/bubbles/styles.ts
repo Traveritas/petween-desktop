@@ -159,6 +159,25 @@ registerBubbleStyle({
 .pt-bubble--glass .pt-bubble__timer { font-variant-numeric: tabular-nums; font-weight: 600; }
 .pt-bubble--glass .pt-bubble__lines { font-variant-numeric: tabular-nums; font-weight: 600; }
 .pt-bubble--glass .pt-bubble__files { opacity: 0.65; margin-left: 6px; font-weight: 400; }
+/* Kind refinements: a pill suits short chips; paragraphs and summaries get
+   card shapes (user feedback v0.3.7). */
+.pt-bubble--glass.pt-bubble--kind-reply {
+  border-radius: 14px;
+  padding: 10px 14px;
+  line-height: 1.55;
+  text-align: left;
+}
+.pt-bubble--glass.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.pt-bubble--glass.pt-bubble--kind-turn {
+  border-radius: 16px;
+  padding: 8px 16px;
+}
+
 `,
   render(el, content) {
     if (content.kind === 'thinking') renderThinking(el, content)
@@ -188,6 +207,22 @@ registerBubbleStyle({
 .pt-bubble--terminal .pt-bubble__timer,
 .pt-bubble--terminal .pt-bubble__lines { color: #ffd479; font-weight: 600; }
 .pt-bubble--terminal .pt-bubble__files { color: #5d7285; margin-left: 6px; }
+.pt-bubble--terminal.pt-bubble--kind-reply {
+  padding: 9px 12px;
+  line-height: 1.55;
+  text-align: left;
+  border-radius: 6px;
+}
+.pt-bubble--terminal.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+}
+.pt-bubble--terminal.pt-bubble--kind-turn {
+  padding: 7px 12px;
+  border-radius: 6px;
+}
+
 `,
   render(el, content) {
     if (content.kind === 'thinking') renderThinking(el, content)
@@ -216,6 +251,22 @@ registerBubbleStyle({
 .pt-bubble--soft .pt-bubble__timer,
 .pt-bubble--soft .pt-bubble__lines { color: #3b7dd8; font-weight: 700; }
 .pt-bubble--soft .pt-bubble__files { color: #8a93a8; margin-left: 6px; }
+.pt-bubble--soft.pt-bubble--kind-reply {
+  border-radius: 12px;
+  padding: 10px 14px;
+  line-height: 1.55;
+  text-align: left;
+}
+.pt-bubble--soft.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+}
+.pt-bubble--soft.pt-bubble--kind-turn {
+  border-radius: 12px;
+  padding: 8px 14px;
+}
+
 `,
   render(el, content) {
     if (content.kind === 'thinking') renderThinking(el, content)
