@@ -390,3 +390,13 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 - [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）
 - [ ] 数据目录策略确认：独立 `userData/petween-home/` + 一次性从 `~/.dsh/petween` 导入（02 号文档 §4 的推荐）
 - [ ] 是否需要 macOS 支持（穿透/托盘 API 有平台差异，MVP 只验 Windows）
+
+## 2026-09-19（下午）：真机反馈修复批——三栏 DCC 布局重构 + 光标/预览两修（上游 `50942a5` / 桌面 `b7b524e`）
+
+用户初测三问题，全部处理：
+
+1. **光标闪动**（默认↔crosshair/ew-resize/grab 来回抢夺）：根因两处——`.rulerTick` 刻度文字没有 `pointer-events:none`（盖在标尺上导致命中测试翻转）+ 时间轴无 `user-select:none`（拖动触发文本选择出现 I-beam）。修复 + `:active` grabbing 光标。
+2. **预览穿插**：预览此前是裸 PetRenderer 塞进 flex 格，舞台层动画 transform 越界漂到相邻组件上。现在收容进 `stageBox`（relative + overflow:hidden + 300px + 居中 + 底部径向渐变地面）。预览的正确位置：中列上方的「预览」面板（program monitor）。
+3. **布局重构**（放开旧排版，参考美学 skill=impeccable/Operate 模式）：三栏 DCC 语法——**左列动画库 | 中列预览舞台+传输条、时间轴面板 | 右列属性/检查器/操作**。检查器经 TimelineEditor 新 `inspectorTarget` portal prop 停靠右栏（缺省仍内联，V1.1 行为不变）；传输条带播放头 tabular-nums 时间读数；撤销/重做并入时间轴面板头；≤1280px 属性栏折叠到时间轴下方。审查方式：无头 Edge CDP 截图（空态+选中态）+ DOM 几何探针（临时 harness，已删）。
+
+上游 1111 / 桌面 194 用例全绿。**真机复验待用户**（重装 dist 或 dev）。
