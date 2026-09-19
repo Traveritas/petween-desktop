@@ -12,7 +12,7 @@ Petween 的独立桌面版：Electron 壳 + DSH 状态桥，把现有 DSH Web UI
 
 ```
 petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 + 计划）
-├── vendor/petween          ← git submodule → github.com/Traveritas/petween（锁定 4fa4de8）
+├── vendor/petween          ← git submodule → github.com/Traveritas/petween（锁定 900f1d6）
 └── vendor/petween-physics  ← git submodule → github.com/Traveritas/petween-physics（锁定 0bbc914）
 ```
 
@@ -81,7 +81,8 @@ pnpm dist:win                                                            # petwe
 - **2026-09-18（晚）：Phase 9 zcode 连接器完成、真机验收通过**（规格 docs/06；StateRelay 缝 + 伪造 DSH 信封，petween 零改动；curl cfg 端口发现 + 合并安装 + per-session watchdog；131 用例全绿含真实 curl 端到端冒烟；用户确认功能正常）。同晚追加：**跟随模式**（`followLatestUser`——多会话只联动最近用户主动事件过的会话，焦点代理/退休/重放见 docs/06 §3.1）；**思考/工作不换图定性为 §15.2 设计默认**（`changePoseWithinActive=false`，已翻转用户活配置，编辑器「高级与互动」有开关；上游默认值改不改待拍板）。v0.2.1 产物在 `dist-0.2.1/`。注意：zcode hooks 配置**客户端启动时读取**（运行中不热加载，spike 实证）。
 - **2026-09-18（深夜）：Phase 10 统计泡泡 HUD 代码完成**（思考用时/编辑行数泡泡，docs/05 Phase 10 + docs/06 §8：hook stdin 转发 `--data-binary @-` + 端点双格式解析（spike 实证 stdin 双命名载荷，PreToolUse 即带 toolInput）+ 连接器无关 stats 账本（记账在 follow 门控之前）+ `GET /api/petween-desktop/stats` + BubbleHost 样式/动画注册表 + stats-hud companion（纯 reducer 可测）；186 用例全绿；**真机待用户重装 hooks + 重启 zcode 验收**——旧格式 hooks 期间宠物联动照旧、只是无泡泡。对话泡泡拍板为独立插件（复用 BubbleHost）。
 - **2026-09-19：Phase 11 动画编辑器独立窗口（V1.2 骨架）代码完成**（上游 `4fa4de8`：`/petween-animator/` 自包含工作台页 + static-page 工厂 + animation-draft 共享提取 + AnimatorStore，1057 用例全绿；桌面：animator-window（按需创建/close→hide）+ 托盘/设置双入口 + builder/装配，194 用例全绿；手感升级三批 = Phase 12 scrub/zoom → 13 多选/undo/菜单 → 14 曲线编辑器，详见 docs/05 Phase 11；**真机验收待用户**）。
-- petween 基线：58 测试文件 / 1057 用例全绿（`4fa4de8` = V1.2 动画工作台骨架；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：10 文件 / 166 用例。
+- **2026-09-19：Phase 12 手感一批代码完成**（上游 `900f1d6`：sampleTimelineAt 采样预览（与播放逐像素一致）+ PreviewSession.scrubDefinition 直写舞台层 + Ctrl+滚轮光标锚缩放/滚轮平移 + ms 自适应标尺（1-2-5 步进）+ 目标吸附（帧/事件/播放头，Alt 临时禁用，擦洗排除自身）+ Space 播放/停止；TimelineEditor 全部可选 props，V1.1 行为零变化；1088 用例全绿。桌面仅 bump 指针；**真机验收待用户**）。
+- petween 基线：62 测试文件 / 1088 用例全绿（`900f1d6` = V1.2 工作台 + Phase 12 scrub/zoom 手感；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则
 

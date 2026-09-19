@@ -331,6 +331,24 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 - Phase 13：多选/框选/批量拖动 + undo/redo（手势级快照栈）+ 右键菜单 + 快捷键全集
 - Phase 14：单段 cubic-bezier 曲线编辑器（KeyframeInspector 内嵌画布）+ 上游护栏措辞修订（§2.2/§6：排除多段曲线轨道全集，允许单段手柄）
 
+## Phase 12：手感一批——scrub 擦洗 + 采样预览 + zoom/pan + ms 时间轴 + 吸附升级（2026-09-19 代码完成；真机验收待用户）
+
+上游 `900f1d6`（62 文件/1088 用例全绿），桌面仅 bump 指针（194 用例全绿）——窗口重开即得，零桌面代码改动。
+
+### 交付内容（详见上游 implementation-notes「V1.2 Phase 12」节）
+
+1. **scrub 擦洗 + 采样预览**：`sampleTimelineAt` 与播放引擎共用 compiler 数学（逐像素一致），`PreviewSession.scrubDefinition` 直写舞台层内联样式（无 WAAPI/director）；拖标尺预览实时定格；命名 pose-swap 按试播语义换图（匿名过渡换图不换）。
+2. **zoom/pan**：Ctrl+滚轮以光标为锚缩放（1×..64×，工具条百分比按钮复位）；滚轮/触控板水平平移；轨道标签 sticky 悬浮。
+3. **ms 自适应时间轴**：1-2-5 步进刻度（≥44px 恒定），`0/100ms/…/1s` 标签；内部 at 0..1 契约不变。
+4. **吸附升级**：帧/事件拖拽吸附网格+兄弟目标+播放头（6px 捕获半径）；擦洗吸附网格+帧/事件（排除自身防粘滞）；Alt 按住临时禁用 + 工具条开关。
+5. **传输感**：Space 播放/停止试播；←→ 步进播放头（Shift×10）；试播/停止/切换动画自动退出擦洗定格。
+6. TimelineEditor 全部经可选 props（`advanced` 门控），设置页动画库/iframe 编辑器 V1.1 行为零变化（回归测试锁定）。
+
+### 验收
+
+- [x] 上游 1088 + 桌面 194 用例全绿；animator bundle 1.51MB
+- [ ] 真机：打开动画编辑器窗口 → 选中动画 → 拖标尺看预览定格与换图；Ctrl+滚轮缩放围绕光标；拖关键帧吸附到播放头/其他帧；Alt 拖动禁用吸附；Space 试播
+
 ## 待用户拍板项
 
 - [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）
