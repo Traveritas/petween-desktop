@@ -1,6 +1,6 @@
 {
   "name": "petween-desktop",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Petween desktop pet — Electron shell + DSH state bridge around the petween plugin (zero-modification assembly)",
   "license": "MIT",
   "private": true,
