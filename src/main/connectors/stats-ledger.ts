@@ -33,19 +33,30 @@ export interface StateFact {
   sessionId: string
   state: LedgerAgentState
   at: number
+  /** Present on the turn-end state (zcode Stop payload) — carries into the summary. */
+  turnId?: string
+}
+
+/** A turn opened (user submitted a prompt): deltas are measured from here. */
+export interface TurnStartFact {
+  sessionId: string
+  at: number
+  turnId?: string
 }
 
 export interface StatsLedgerEvent {
   seq: number
   at: number
   sessionId: string
-  type: 'state' | 'edit'
+  type: 'state' | 'edit' | 'turn-summary'
   state?: LedgerAgentState
   tool?: EditFact['tool']
   filePath?: string
   added?: number | null
   removed?: number | null
   turnId?: string
+  /** turn-summary payload: per-turn deltas + wall duration. */
+  summary?: { thinkingMs: number; linesAdded: number; linesRemoved: number; edits: number; durationMs: number }
 }
 
 export interface StatsSessionSummary {
@@ -72,6 +83,7 @@ export interface StatsSnapshot {
 export interface StatsLedger {
   recordState(fact: StateFact): void
   recordEdit(fact: EditFact): void
+  recordTurnStart(fact: TurnStartFact): void
   /** Explicit focus (follow target); null lets the ledger fall back to the last active session. */
   setFocus(sessionId: string | null): void
   disposeSession(sessionId: string): void
@@ -82,6 +94,15 @@ const RING_CAPACITY = 256
 
 interface SessionRow {
   summary: StatsSessionSummary
+  /** Open turn baseline (null between turns); closed into a turn-summary on success. */
+  turn: {
+    startedAt: number
+    baseThinkingMs: number
+    baseAdded: number
+    baseRemoved: number
+    baseEdits: number
+    turnId?: string
+  } | null
 }
 
 export interface StatsLedgerDeps {
@@ -106,7 +127,7 @@ export function createStatsLedger(deps: StatsLedgerDeps): StatsLedger {
   const rowOf = (sessionId: string, at: number): SessionRow => {
     let row = sessions.get(sessionId)
     if (row === undefined) {
-      row = { summary: { state: 'idle', thinkingMs: 0, thinkingSince: null, linesAdded: 0, linesRemoved: 0, edits: 0, lastAt: at } }
+      row = { summary: { state: 'idle', thinkingMs: 0, thinkingSince: null, linesAdded: 0, linesRemoved: 0, edits: 0, lastAt: at }, turn: null }
       sessions.set(sessionId, row)
     }
     return row
@@ -119,7 +140,7 @@ export function createStatsLedger(deps: StatsLedgerDeps): StatsLedger {
   }
 
   return {
-    recordState({ sessionId, state, at }) {
+    recordState({ sessionId, state, at, turnId }) {
       const row = rowOf(sessionId, at)
       if (state === 'thinking' && row.summary.state !== 'thinking') {
         row.summary.thinkingSince = at
@@ -129,6 +150,26 @@ export function createStatsLedger(deps: StatsLedgerDeps): StatsLedger {
       row.summary.state = state
       row.summary.lastAt = at
       pushEvent({ at, sessionId, type: 'state', state })
+      // Turn end: emit the per-turn deltas, then arm the next turn.
+      if (state === 'success' && row.turn !== null) {
+        const turn = row.turn
+        row.turn = null
+        pushEvent({
+          at,
+          sessionId,
+          type: 'turn-summary',
+          turnId: turnId ?? turn.turnId,
+          summary: {
+            thinkingMs: Math.max(0, row.summary.thinkingMs - turn.baseThinkingMs),
+            linesAdded: row.summary.linesAdded - turn.baseAdded,
+            linesRemoved: row.summary.linesRemoved - turn.baseRemoved,
+            edits: row.summary.edits - turn.baseEdits,
+            durationMs: Math.max(0, at - turn.startedAt),
+          },
+        })
+      }
+      // An abandoned turn (session restart / idle decay) never summarizes.
+      if (state === 'idle') row.turn = null
     },
 
     recordEdit(fact) {
@@ -147,6 +188,18 @@ export function createStatsLedger(deps: StatsLedgerDeps): StatsLedger {
         removed: fact.removed,
         turnId: fact.turnId,
       })
+    },
+
+    recordTurnStart({ sessionId, at, turnId }) {
+      const row = rowOf(sessionId, at)
+      row.turn = {
+        startedAt: at,
+        baseThinkingMs: row.summary.thinkingMs,
+        baseAdded: row.summary.linesAdded,
+        baseRemoved: row.summary.linesRemoved,
+        baseEdits: row.summary.edits,
+        turnId,
+      }
     },
 
     setFocus(sessionId) {

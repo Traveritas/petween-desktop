@@ -10,10 +10,11 @@ import type { StatsLedger, EditFact, StateFact } from '../../src/main/connectors
 import type { StateRelay } from '../../src/main/state-relay'
 
 interface LedgerCall {
-  kind: 'state' | 'edit' | 'focus' | 'dispose'
+  kind: 'state' | 'edit' | 'focus' | 'dispose' | 'turn-start'
   state?: StateFact
   edit?: EditFact
   sessionId?: string
+  turn?: { sessionId: string; at: number; turnId?: string }
 }
 
 function fakeLedger(): { ledger: StatsLedger; calls: LedgerCall[] } {
@@ -24,6 +25,9 @@ function fakeLedger(): { ledger: StatsLedger; calls: LedgerCall[] } {
     },
     recordEdit(edit: EditFact) {
       calls.push({ kind: 'edit', edit })
+    },
+    recordTurnStart(turn: { sessionId: string; at: number; turnId?: string }) {
+      calls.push({ kind: 'turn-start', turn })
     },
     setFocus(sessionId: string | null) {
       calls.push({ kind: 'focus', sessionId: sessionId ?? '' })
@@ -166,5 +170,27 @@ describe('watchdog interplay', () => {
     connector.handle({ kind: 'user-prompt-submit', sessionId: S1 })
     vi.advanceTimersByTime(30 * 60 * 1000 + 10)
     expect(calls).toContainEqual({ kind: 'dispose', sessionId: S1 })
+  })
+})
+
+describe('turn tracking (second batch)', () => {
+  it('user-prompt-submit opens a ledger turn with the payload turnId', () => {
+    const { connector, calls } = setup()
+    connector.handle({ kind: 'user-prompt-submit', sessionId: S1, payload: { at: 700, turnId: 'turn_9' } })
+    const turn = calls.find((call) => call.kind === 'turn-start')?.turn
+    expect(turn).toEqual({ sessionId: S1, at: 700, turnId: 'turn_9' })
+  })
+
+  it('stop carries the payload turnId into the state fact', () => {
+    const { connector, calls } = setup()
+    connector.handle({ kind: 'stop', sessionId: S1, payload: { at: 900, turnId: 'turn_9' } })
+    expect(calls.find((call) => call.kind === 'state')?.state).toMatchObject({ state: 'success', turnId: 'turn_9' })
+  })
+
+  it('other kinds never open turns', () => {
+    const { connector, calls } = setup()
+    connector.handle({ kind: 'pre-tool-edit', sessionId: S1 })
+    connector.handle({ kind: 'post-tool', sessionId: S1 })
+    expect(calls.some((call) => call.kind === 'turn-start')).toBe(false)
   })
 })

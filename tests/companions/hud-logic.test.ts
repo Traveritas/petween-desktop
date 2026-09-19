@@ -198,9 +198,9 @@ describe('edit bubble episodes', () => {
   })
 })
 
-describe('focus scoping (v1 single session)', () => {
-  it('ignores non-focused sessions entirely', () => {
-    const reducer = createHudReducer()
+describe('focus scoping', () => {
+  it('v1 mode (multiSession off) ignores non-focused sessions entirely', () => {
+    const reducer = createHudReducer({ multiSession: false })
     const commands = reducer.apply(
       snapshot({
         cursor: 3,
@@ -213,8 +213,44 @@ describe('focus scoping (v1 single session)', () => {
     expect(commands).toEqual([])
   })
 
-  it('a focus switch immediately hides the previous focus bubbles (thinking live)', () => {
+  it('multiSession (default) tracks background sessions too — they get their own bubbles', () => {
     const reducer = createHudReducer()
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 3,
+        focusedSessionId: 's1',
+        sessions: {
+          s1: session({ state: 'working' }),
+          s2: session({ state: 'thinking', thinkingSince: T0 - 9999 }),
+        },
+        events: [editEvent(2, T0, 9, 9, 's2'), stateEvent(3, T0, 'thinking', 's2')],
+      }),
+      T0 + 10_000,
+    )
+    expect(commands).toContainEqual({ type: 'edit-show', sessionId: 's2', added: 9, removed: 9, files: 1 })
+    expect(commands).toContainEqual({ type: 'thinking-show', sessionId: 's2', startedAt: T0 - 9999 })
+  })
+
+  it('sessions missing from the snapshot (watchdog dispose) retire their bubbles', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }), s2: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 4, 0, 's2')],
+      }),
+      T0 + 100,
+    )
+    const after = reducer.apply(
+      snapshot({ cursor: 2, focusedSessionId: 's1', sessions: { s1: session({ state: 'working' }) } }),
+      T0 + 200,
+    )
+    expect(after).toEqual([{ type: 'edit-hide', sessionId: 's2', holdMs: 0, maxAgeReached: false }])
+  })
+
+  it('multiSession off: a focus switch immediately hides the previous focus bubbles (thinking live)', () => {
+    const reducer = createHudReducer({ multiSession: false })
     reducer.apply(
       snapshot({
         cursor: 1,
@@ -230,8 +266,8 @@ describe('focus scoping (v1 single session)', () => {
     expect(switched).toEqual([{ type: 'thinking-hide', sessionId: 's1', totalMs: 0, holdMs: 0 }])
   })
 
-  it('a focus switch immediately hides the previous focus bubbles (edit episode live)', () => {
-    const reducer = createHudReducer()
+  it('multiSession off: a focus switch immediately hides the previous focus bubbles (edit episode live)', () => {
+    const reducer = createHudReducer({ multiSession: false })
     reducer.apply(
       snapshot({
         cursor: 1,
@@ -252,5 +288,118 @@ describe('focus scoping (v1 single session)', () => {
     const reducer = createHudReducer()
     const commands = reducer.apply(snapshot({ cursor: 0, focusedSessionId: null, sessions: {} }), T0)
     expect(commands).toEqual([])
+  })
+})
+
+describe('turn summary bubbles (second batch)', () => {
+  const summaryEvent = (seq: number, at: number, sessionId = 's1') => ({
+    seq,
+    at,
+    sessionId,
+    type: 'turn-summary' as const,
+    turnId: 'turn_x',
+    summary: { thinkingMs: 21_000, linesAdded: 40, linesRemoved: 3, edits: 4, durationMs: 134_000 },
+  })
+
+  it('emits turn-show for the summary event', () => {
+    const reducer = createHudReducer()
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'success' }) },
+        events: [summaryEvent(1, T0 + 5000)],
+      }),
+      T0 + 6000,
+    )
+    expect(commands).toEqual([
+      {
+        type: 'turn-show',
+        sessionId: 's1',
+        turnId: 'turn_x',
+        thinkingMs: 21_000,
+        linesAdded: 40,
+        linesRemoved: 3,
+        edits: 4,
+        durationMs: 134_000,
+      },
+    ])
+  })
+
+  it('turnSummary off suppresses it', () => {
+    const reducer = createHudReducer({ turnSummary: false })
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'success' }) },
+        events: [summaryEvent(1, T0 + 5000)],
+      }),
+      T0 + 6000,
+    )
+    expect(commands).toEqual([])
+  })
+})
+
+describe('edit milestones (second batch)', () => {
+  it('fires once per crossing of milestoneEveryLines added lines', () => {
+    const reducer = createHudReducer({ milestoneEveryLines: 100 })
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 3,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 60, 0), editEvent(2, T0 + 10, 30, 0), editEvent(3, T0 + 20, 90, 0), editEvent(4, T0 + 30, 20, 0)],
+      }),
+      T0 + 100,
+    )
+    // Totals 60, 90, 180, 200 → level 1 at 180, level 2 at 200.
+    expect(commands.filter((command) => command.type === 'edit-milestone')).toEqual([
+      { type: 'edit-milestone', sessionId: 's1', lines: 180, level: 1 },
+      { type: 'edit-milestone', sessionId: 's1', lines: 200, level: 2 },
+    ])
+  })
+
+  it('milestones reset with a new episode', () => {
+    const reducer = createHudReducer({ milestoneEveryLines: 100 })
+    reducer.apply(
+      snapshot({
+        cursor: 2,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [editEvent(1, T0, 120, 0), stateEvent(2, T0 + 10, 'thinking')],
+      }),
+      T0 + 100,
+    )
+    const second = reducer.apply(
+      snapshot({
+        cursor: 4,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'working' }) },
+        events: [stateEvent(3, T0 + 200, 'working'), editEvent(4, T0 + 300, 150, 0)],
+      }),
+      T0 + 400,
+    )
+    const milestones = second.filter((command) => command.type === 'edit-milestone')
+    expect(milestones).toEqual([{ type: 'edit-milestone', sessionId: 's1', lines: 150, level: 1 }])
+  })
+})
+
+describe('multiSession focus switches (second batch)', () => {
+  it('multiSession on: a focus switch keeps the previous focus bubbles alive', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({
+        cursor: 1,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) },
+      }),
+      T0 + 5000,
+    )
+    const switched = reducer.apply(
+      snapshot({ cursor: 2, focusedSessionId: 's2', sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }), s2: session({ state: 'idle' }) } }),
+      T0 + 5100,
+    )
+    expect(switched).toEqual([])
   })
 })

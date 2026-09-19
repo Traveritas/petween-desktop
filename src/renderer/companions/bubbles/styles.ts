@@ -16,6 +16,18 @@ export type BubbleContent =
   | { kind: 'thinking'; sessionId: string; startedAt: number }
   /** added/removed are the EPISODE totals (live while working); null = unknown counts. */
   | { kind: 'edit'; sessionId: string; added: number | null; removed: number | null; files: number }
+  /** Turn-end summary (完成提醒): per-turn deltas + wall duration. */
+  | {
+      kind: 'turn'
+      sessionId: string
+      thinkingMs: number
+      linesAdded: number
+      linesRemoved: number
+      edits: number
+      durationMs: number
+    }
+  /** The model's last reply preview (dialogue bubble; already truncated main-side). */
+  | { kind: 'reply'; sessionId: string; text: string }
 
 export interface BubbleStyle {
   id: string
@@ -105,6 +117,26 @@ export function renderEdit(el: HTMLElement, content: Extract<BubbleContent, { ki
   files.textContent = content.files > 1 ? `${content.files} 个文件` : ''
 }
 
+export function renderTurn(el: HTMLElement, content: Extract<BubbleContent, { kind: 'turn' }>): void {
+  thinkingLabel(el).textContent = '完成'
+  const parts: string[] = []
+  if (content.thinkingMs > 0) parts.push(`思考 ${formatDuration(content.thinkingMs)}`)
+  if (content.linesAdded !== 0 || content.linesRemoved !== 0) {
+    parts.push(formatLines(content.linesAdded, content.linesRemoved))
+  } else if (content.edits > 0) {
+    parts.push(`${content.edits} 次编辑`)
+  }
+  if (parts.length === 0) parts.push('回合结束')
+  parts.push(formatDuration(content.durationMs))
+  valueOf(el, '.pt-bubble__turn').textContent = parts.join(' · ')
+}
+
+export function renderReply(el: HTMLElement, content: Extract<BubbleContent, { kind: 'reply' }>): void {
+  el.classList.add('pt-bubble--wrap')
+  thinkingLabel(el).textContent = '回复'
+  valueOf(el, '.pt-bubble__reply').textContent = content.text
+}
+
 // --- Built-in styles ---------------------------------------------------------
 
 registerBubbleStyle({
@@ -130,6 +162,8 @@ registerBubbleStyle({
 `,
   render(el, content) {
     if (content.kind === 'thinking') renderThinking(el, content)
+    else if (content.kind === 'turn') renderTurn(el, content)
+    else if (content.kind === 'reply') renderReply(el, content)
     else renderEdit(el, content)
   },
 })
@@ -157,6 +191,8 @@ registerBubbleStyle({
 `,
   render(el, content) {
     if (content.kind === 'thinking') renderThinking(el, content)
+    else if (content.kind === 'turn') renderTurn(el, content)
+    else if (content.kind === 'reply') renderReply(el, content)
     else renderEdit(el, content)
   },
 })
@@ -183,6 +219,8 @@ registerBubbleStyle({
 `,
   render(el, content) {
     if (content.kind === 'thinking') renderThinking(el, content)
+    else if (content.kind === 'turn') renderTurn(el, content)
+    else if (content.kind === 'reply') renderReply(el, content)
     else renderEdit(el, content)
   },
 })

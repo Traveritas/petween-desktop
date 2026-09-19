@@ -232,7 +232,15 @@ export function createZcodeConnector(deps: ZcodeConnectorDeps): ZcodeConnector {
       // sessions keep the ledger current exactly like they keep watchdogs.
       if (deps.stats !== undefined) {
         const at = payload?.at ?? ts
-        deps.stats.recordState({ sessionId, state: LEDGER_STATE_BY_KIND[kind], at })
+        deps.stats.recordState({
+          sessionId,
+          state: LEDGER_STATE_BY_KIND[kind],
+          at,
+          turnId: kind === 'stop' ? payload?.turnId : undefined,
+        })
+        if (kind === 'user-prompt-submit') {
+          deps.stats.recordTurnStart({ sessionId, at, turnId: payload?.turnId })
+        }
         if (kind === 'pre-tool-edit' && payload !== undefined) {
           const counts = countEditLines(payload.toolName, payload.toolInput)
           deps.stats.recordEdit({

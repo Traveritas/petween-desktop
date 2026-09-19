@@ -108,3 +108,44 @@ describe('disposeSession', () => {
     expect(snap.events.length).toBeGreaterThan(0)
   })
 })
+
+describe('turn tracking (second batch)', () => {
+  it('summarizes per-turn deltas on success and re-arms on the next prompt', () => {
+    const book = ledger()
+    book.recordTurnStart({ sessionId: 's1', at: T0, turnId: 'turn_1' })
+    book.recordState({ sessionId: 's1', state: 'thinking', at: T0 })
+    book.recordState({ sessionId: 's1', state: 'working', at: T0 + 4000 })
+    book.recordEdit({ sessionId: 's1', at: T0 + 5000, tool: 'edit', added: 10, removed: 2 })
+    book.recordState({ sessionId: 's1', state: 'thinking', at: T0 + 6000 })
+    book.recordEdit({ sessionId: 's1', at: T0 + 6500, tool: 'edit', added: 5, removed: 0 })
+    book.recordState({ sessionId: 's1', state: 'success', at: T0 + 10_000, turnId: 'turn_1' })
+    const summary = book.snapshot().events.find((event) => event.type === 'turn-summary')
+    expect(summary).toMatchObject({
+      sessionId: 's1',
+      turnId: 'turn_1',
+      summary: { thinkingMs: 8000, linesAdded: 15, linesRemoved: 2, edits: 2, durationMs: 10_000 },
+    })
+    // Second turn: baselines reset.
+    book.recordTurnStart({ sessionId: 's1', at: T0 + 20_000, turnId: 'turn_2' })
+    book.recordEdit({ sessionId: 's1', at: T0 + 21_000, tool: 'write', added: 7, removed: 0 })
+    book.recordState({ sessionId: 's1', state: 'success', at: T0 + 22_000, turnId: 'turn_2' })
+    const summaries = book.snapshot().events.filter((event) => event.type === 'turn-summary')
+    expect(summaries).toHaveLength(2)
+    expect(summaries[1].summary).toEqual({ thinkingMs: 0, linesAdded: 7, linesRemoved: 0, edits: 1, durationMs: 2000 })
+  })
+
+  it('a session-start idle abandons an open turn (no summary later)', () => {
+    const book = ledger()
+    book.recordTurnStart({ sessionId: 's1', at: T0, turnId: 'turn_1' })
+    book.recordEdit({ sessionId: 's1', at: T0 + 100, tool: 'edit', added: 3, removed: 0 })
+    book.recordState({ sessionId: 's1', state: 'idle', at: T0 + 500 })
+    book.recordState({ sessionId: 's1', state: 'success', at: T0 + 600 })
+    expect(book.snapshot().events.some((event) => event.type === 'turn-summary')).toBe(false)
+  })
+
+  it('success without an open turn emits no summary', () => {
+    const book = ledger()
+    book.recordState({ sessionId: 's1', state: 'success', at: T0 })
+    expect(book.snapshot().events.some((event) => event.type === 'turn-summary')).toBe(false)
+  })
+})

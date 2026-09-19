@@ -18,13 +18,18 @@ interface OptionBag {
   styleId?: string
   enterAnimationId?: string
   exitAnimationId?: string
+  multiSession?: boolean
+  turnSummary?: boolean
+  dialogue?: boolean
+  milestoneEveryLines?: number
   thinkingShowThresholdMs?: number
   thinkingHoldMs?: number
   editHoldMs?: number
   editMaxAgeMs?: number
 }
 
-const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'enterAnimationId' | 'exitAnimationId'>> = {
+const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'enterAnimationId' | 'exitAnimationId' | 'multiSession' | 'turnSummary' | 'dialogue'>> = {
+  milestoneEveryLines: 0,
   thinkingShowThresholdMs: DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs,
   thinkingHoldMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs,
   editHoldMs: DEFAULT_HUD_OPTIONS.editHoldMs,
@@ -105,6 +110,43 @@ export function StatsHudCard(): JSX.Element {
             </option>
           ))}
         </select>
+      </div>
+      <div style={rowStyle}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={bag.multiSession ?? true}
+            onChange={(event) => patch({ multiSession: event.target.checked })}
+          />
+          <span className="rowHint">多会话各一列（关闭=只显示当前联动会话）</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={bag.turnSummary ?? true}
+            onChange={(event) => patch({ turnSummary: event.target.checked })}
+          />
+          <span className="rowHint">回合完成提醒</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={bag.dialogue ?? true}
+            onChange={(event) => patch({ dialogue: event.target.checked })}
+          />
+          <span className="rowHint">回复摘要泡泡</span>
+        </label>
+      </div>
+      <div style={rowStyle}>
+        <span className="rowHint">里程碑庆祝动画（每累计 N 新增行触发一次，0=关闭）</span>
+        <input
+          type="number"
+          min={0}
+          step={50}
+          value={bag.milestoneEveryLines ?? 0}
+          onChange={(event) => patch({ milestoneEveryLines: Number(event.target.value) })}
+          style={{ width: 80 }}
+        />
       </div>
       <div style={rowStyle}>
         <span className="rowHint">思考显示阈值（ms，短于该时长的思考不弹泡）</span>

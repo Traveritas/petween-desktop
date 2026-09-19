@@ -1,25 +1,24 @@
 /**
- * stats-hud/companion.ts — the stats bubble HUD (Phase 10): thinking time
- * and edit line counts as bubbles floating beside the pet. Data path is the
- * SIDE CHANNEL decided in docs/05 Phase 10 — polls /api/petween-desktop/
- * stats (the main-side ledger fed by the zcode connector), never the petween
- * state envelope, so petween stays untouched.
+ * stats-hud/companion.ts — the stats bubble HUD (Phase 10): thinking time,
+ * edit line counts, turn summaries and reply previews as bubbles floating
+ * beside the pet, one column per agent session. Data path is the SIDE
+ * CHANNEL (docs/05 Phase 10) — polls /api/petween-desktop/stats (the
+ * main-side ledger fed by the zcode connector) plus /dialogue for reply
+ * previews — never the petween state envelope, so petween stays untouched.
  *
  * Cadence: stats 400ms (bubbles are second-granular; the thinking timer
  * ticks locally at 250ms between polls from thinkingSince), settings 3s
  * (style/animation picks), stage snapshots drive the anchor (bodyRect).
  * The whole subtree is pointer-events:none — click-through is not affected.
+ * The BubbleHost is the shared singleton (dialogue lives in the same columns).
  */
 import type { ComponentType } from 'react'
 import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import type { StatsSnapshot } from '../../../main/connectors/stats-ledger'
-import { createBubbleHost, type BubbleHandle } from '../bubbles/bubble-host'
+import { acquireSharedBubbleHost, releaseSharedBubbleHost } from '../bubbles/shared-host'
+import type { BubbleHandle } from '../bubbles/bubble-host'
 import { formatDuration, listBubbleStyles } from '../bubbles/styles'
-import {
-  LEGACY_BUNDLED_EXITS,
-  listBubbleEnterAnimations,
-  listBubbleExitAnimations,
-} from '../bubbles/animations'
+import { listBubbleEnterAnimations, listBubbleExitAnimations } from '../bubbles/animations'
 import { createHudReducer, DEFAULT_HUD_OPTIONS, type HudCommand, type HudOptions } from './hud-logic'
 import { StatsHudCard } from './settings-card'
 
@@ -30,34 +29,41 @@ export interface StatsHudOptions extends HudOptions {
   styleId?: string
   enterAnimationId?: string
   exitAnimationId?: string
+  dialogue?: boolean
+  milestoneAnimationId?: string
 }
 
 const STATS_POLL_MS = 400
 const TIMER_TICK_MS = 250
 const SETTINGS_POLL_MS = 3000
+const TURN_HOLD_MS = 4000
+const REPLY_HOLD_MS = 7000
+const MILESTONE_ANIMATION_DEFAULT = 'builtin:click-pop'
+const MILESTONE_THROTTLE_MS = 10_000
+const DIALOGUE_RETRIES = 3
+const DIALOGUE_RETRY_MS = 700
 
 const clampMin = (value: unknown, fallback: number, min: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(min, value) : fallback
 
+const asId = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
+
 function normalizeOptions(raw: unknown): StatsHudOptions {
   const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
-  const asId = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
-  const options: StatsHudOptions = {
+  return {
     styleId: asId(bag.styleId),
     enterAnimationId: asId(bag.enterAnimationId),
     exitAnimationId: asId(bag.exitAnimationId),
+    dialogue: typeof bag.dialogue === 'boolean' ? bag.dialogue : true,
+    milestoneAnimationId: asId(bag.milestoneAnimationId) ?? MILESTONE_ANIMATION_DEFAULT,
+    multiSession: typeof bag.multiSession === 'boolean' ? bag.multiSession : true,
+    turnSummary: typeof bag.turnSummary === 'boolean' ? bag.turnSummary : true,
+    milestoneEveryLines: clampMin(bag.milestoneEveryLines, 0, 0),
     thinkingShowThresholdMs: clampMin(bag.thinkingShowThresholdMs, DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs, 0),
     thinkingHoldMs: clampMin(bag.thinkingHoldMs, DEFAULT_HUD_OPTIONS.thinkingHoldMs, 0),
     editHoldMs: clampMin(bag.editHoldMs, DEFAULT_HUD_OPTIONS.editHoldMs, 0),
     editMaxAgeMs: clampMin(bag.editMaxAgeMs, DEFAULT_HUD_OPTIONS.editMaxAgeMs, 0),
   }
-  // v0.2.3 stored one bundled `animationId`; migrate it to the same look.
-  const legacy = asId(bag.animationId)
-  if (legacy !== undefined) {
-    if (options.enterAnimationId === undefined) options.enterAnimationId = legacy
-    if (options.exitAnimationId === undefined) options.exitAnimationId = LEGACY_BUNDLED_EXITS[legacy]
-  }
-  return options
 }
 
 interface LiveThinking {
@@ -71,34 +77,31 @@ export function createStatsHudCompanion(): DesktopCompanion {
   return {
     id: STATS_HUD_ID,
     displayName: '统计泡泡（思考 / 编辑行数）',
-    description: '思考用时与文件写入行数以泡泡形式悬浮在宠物旁，随写入实时累加，完成后淡出。数据来自 zcode 连接器。',
+    description: '思考用时、文件写入行数、回合摘要与模型回复以泡泡形式悬浮在宠物旁（每会话一列）。数据来自 zcode 连接器。',
     SettingsCard: StatsHudCard as ComponentType,
     init({ petween }: DesktopCompanionContext) {
-      let options: StatsHudOptions = normalizeOptions(undefined)
+      let options = normalizeOptions(undefined)
       let disposed = false
       let cursor = 0
       // ONE reducer instance: it owns per-session episode tracking across
       // polls; option changes flow in through the getter, not a rebuild.
       const reducer = createHudReducer(() => options)
       let box: { x: number; y: number; width: number; height: number } | null = null
-      let thinking: LiveThinking | null = null
-      let editHandle: BubbleHandle | null = null
-      const pendingCloses = new Map<string, ReturnType<typeof setTimeout>>()
+      const thinking = new Map<string, LiveThinking>()
+      const editHandles = new Map<string, BubbleHandle>()
+      const lastMilestoneAt = new Map<string, number>()
       const timers = new Set<ReturnType<typeof setTimeout>>()
 
-      const host = createBubbleHost({
+      const host = acquireSharedBubbleHost({
         anchor: () => box,
         viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
       })
 
-      const keyOf = { thinking: (sessionId: string): string => `thinking:${sessionId}`, edit: (sessionId: string): string => `edit:${sessionId}` }
-
-      const cancelPendingClose = (key: string): void => {
-        const timer = pendingCloses.get(key)
-        if (timer !== undefined) {
-          clearTimeout(timer)
-          pendingCloses.delete(key)
-        }
+      const keyOf = {
+        thinking: (sessionId: string): string => `thinking:${sessionId}`,
+        edit: (sessionId: string): string => `edit:${sessionId}`,
+        turn: (sessionId: string, turnId?: string): string => `turn:${sessionId}:${turnId ?? ''}`,
+        reply: (sessionId: string, tag: string): string => `reply:${sessionId}:${tag}`,
       }
 
       const later = (fn: () => void, delayMs: number): void => {
@@ -109,56 +112,89 @@ export function createStatsHudCompanion(): DesktopCompanion {
         timers.add(timer)
       }
 
-      const styleId = (): string | undefined => options.styleId
-      const enterAnimationId = (): string | undefined => options.enterAnimationId
-      const exitAnimationId = (): string | undefined => options.exitAnimationId
+      const spawnHeld = (key: string, sessionId: string, content: Parameters<BubbleHandle['update']>[0], holdMs: number): void => {
+        const handle = host.spawn({
+          key,
+          sessionKey: sessionId,
+          styleId: options.styleId,
+          enterAnimationId: options.enterAnimationId,
+          exitAnimationId: options.exitAnimationId,
+          content,
+        })
+        if (holdMs > 0) {
+          later(() => handle.close(), holdMs)
+        }
+      }
+
+      /** Reply preview for the just-finished turn; the rollout write may lag
+       *  the Stop hook, so retry a couple of times when the turnId mismatches. */
+      const pullDialogue = (sessionId: string, turnId: string | undefined): void => {
+        if (options.dialogue !== true || disposed) return
+        const attempt = (remaining: number): void => {
+          if (disposed) return
+          void fetch(`/api/petween-desktop/dialogue?session=${encodeURIComponent(sessionId)}`)
+            .then((response) => (response.ok ? (response.json() as Promise<{ turnId: string | null; text: string }>) : null))
+            .then((preview) => {
+              if (disposed || preview === null) return
+              const matched = turnId === undefined || preview.turnId === turnId
+              if (!matched && remaining > 0) {
+                later(() => attempt(remaining - 1), DIALOGUE_RETRY_MS)
+                return
+              }
+              if (preview.text === '') return
+              spawnHeld(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, { kind: 'reply', sessionId, text: preview.text }, REPLY_HOLD_MS)
+            })
+            .catch(() => {})
+        }
+        attempt(DIALOGUE_RETRIES)
+      }
 
       const execute = (command: HudCommand): void => {
         switch (command.type) {
           case 'thinking-show': {
             const key = keyOf.thinking(command.sessionId)
-            cancelPendingClose(key)
             const handle = host.spawn({
               key,
-              styleId: styleId(),
-              enterAnimationId: enterAnimationId(),
-              exitAnimationId: exitAnimationId(),
+              sessionKey: command.sessionId,
+              styleId: options.styleId,
+              enterAnimationId: options.enterAnimationId,
+              exitAnimationId: options.exitAnimationId,
               content: { kind: 'thinking', sessionId: command.sessionId, startedAt: command.startedAt },
             })
-            thinking = { handle, startedAt: command.startedAt, finalMs: null }
+            thinking.set(command.sessionId, { handle, startedAt: command.startedAt, finalMs: null })
             break
           }
           case 'thinking-hide': {
-            const key = keyOf.thinking(command.sessionId)
-            const live = thinking
-            if (live === null || live.handle.key !== key) break
+            const live = thinking.get(command.sessionId)
+            if (live === undefined) break
             live.finalMs = command.totalMs
             const timerNode = live.handle.el.querySelector<HTMLElement>('.pt-bubble__timer')
             if (timerNode !== null) timerNode.textContent = formatDuration(command.totalMs)
-            cancelPendingClose(key)
             later(() => {
               live.handle.close()
-              if (thinking === live) thinking = null
+              if (thinking.get(command.sessionId) === live) thinking.delete(command.sessionId)
             }, command.holdMs)
             break
           }
           case 'edit-show': {
             const key = keyOf.edit(command.sessionId)
-            cancelPendingClose(key)
-            editHandle = host.spawn({
-              key,
-              styleId: styleId(),
-              enterAnimationId: enterAnimationId(),
-              exitAnimationId: exitAnimationId(),
-              content: { kind: 'edit', sessionId: command.sessionId, added: command.added, removed: command.removed, files: command.files },
-            })
+            editHandles.set(
+              command.sessionId,
+              host.spawn({
+                key,
+                sessionKey: command.sessionId,
+                styleId: options.styleId,
+                enterAnimationId: options.enterAnimationId,
+                exitAnimationId: options.exitAnimationId,
+                content: { kind: 'edit', sessionId: command.sessionId, added: command.added, removed: command.removed, files: command.files },
+              }),
+            )
             break
           }
           case 'edit-update': {
-            const key = keyOf.edit(command.sessionId)
-            const handle = editHandle ?? host.find(key)
+            const handle = editHandles.get(command.sessionId) ?? host.find(keyOf.edit(command.sessionId))
             if (handle === null) break
-            editHandle = handle
+            editHandles.set(command.sessionId, handle)
             handle.update(
               { kind: 'edit', sessionId: command.sessionId, added: command.added, removed: command.removed, files: command.files },
               { bump: true },
@@ -166,24 +202,54 @@ export function createStatsHudCompanion(): DesktopCompanion {
             break
           }
           case 'edit-hide': {
-            const key = keyOf.edit(command.sessionId)
-            const handle = editHandle ?? host.find(key)
+            const handle = editHandles.get(command.sessionId) ?? host.find(keyOf.edit(command.sessionId))
             if (handle === null) break
-            cancelPendingClose(key)
             later(() => {
               handle.close()
-              if (editHandle === handle) editHandle = null
+              if (editHandles.get(command.sessionId) === handle) editHandles.delete(command.sessionId)
             }, command.holdMs)
+            break
+          }
+          case 'turn-show': {
+            spawnHeld(
+              keyOf.turn(command.sessionId, command.turnId),
+              command.sessionId,
+              {
+                kind: 'turn',
+                sessionId: command.sessionId,
+                thinkingMs: command.thinkingMs,
+                linesAdded: command.linesAdded,
+                linesRemoved: command.linesRemoved,
+                edits: command.edits,
+                durationMs: command.durationMs,
+              },
+              TURN_HOLD_MS,
+            )
+            pullDialogue(command.sessionId, command.turnId)
+            break
+          }
+          case 'edit-milestone': {
+            const last = lastMilestoneAt.get(command.sessionId) ?? -Infinity
+            if (Date.now() - last < MILESTONE_THROTTLE_MS) break
+            lastMilestoneAt.set(command.sessionId, Date.now())
+            try {
+              petween.playAnimation(options.milestoneAnimationId ?? MILESTONE_ANIMATION_DEFAULT)
+            } catch {
+              /* a companion must never break the host over a pet effect */
+            }
             break
           }
         }
       }
 
-      const tickTimer = (): void => {
-        const live = thinking
-        if (live === null || live.finalMs !== null || live.handle.closed) return
-        const node = live.handle.el.querySelector<HTMLElement>('.pt-bubble__timer')
-        if (node !== null) node.textContent = formatDuration(Date.now() - live.startedAt)
+      const tickTimers = (): void => {
+        const now = Date.now()
+        for (const [sessionId, live] of thinking) {
+          if (live.finalMs !== null || live.handle.closed) continue
+          const node = live.handle.el.querySelector<HTMLElement>('.pt-bubble__timer')
+          if (node !== null) node.textContent = formatDuration(now - live.startedAt)
+          void sessionId
+        }
       }
 
       // Anchor: the pet's real body box; null while no live pet surface.
@@ -200,12 +266,13 @@ export function createStatsHudCompanion(): DesktopCompanion {
           .then((snapshot) => {
             if (disposed || snapshot === null) return
             cursor = snapshot.cursor
+            host.setFocusSession(snapshot.focusedSessionId)
             for (const command of reducer.apply(snapshot, Date.now())) execute(command)
           })
           .catch(() => {})
       }
       const statsTimer = setInterval(pollStats, STATS_POLL_MS)
-      const tickTimerId = setInterval(tickTimer, TIMER_TICK_MS)
+      const tickTimerId = setInterval(tickTimers, TIMER_TICK_MS)
 
       const pullOptions = (): void => {
         if (disposed) return
@@ -239,12 +306,11 @@ export function createStatsHudCompanion(): DesktopCompanion {
         clearInterval(settingsTimer)
         for (const timer of timers) clearTimeout(timer)
         timers.clear()
-        for (const timer of pendingCloses.values()) clearTimeout(timer)
-        pendingCloses.clear()
         unsubscribeStage()
-        host.dispose()
-        thinking = null
-        editHandle = null
+        releaseSharedBubbleHost()
+        thinking.clear()
+        editHandles.clear()
+        lastMilestoneAt.clear()
       }
     },
   }

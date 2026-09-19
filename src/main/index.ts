@@ -17,6 +17,8 @@ import { DEV_LOCAL_PORT } from './dev-port'
 import { createZcodeConnector } from './connectors/zcode-connector'
 import { createStatsLedger } from './connectors/stats-ledger'
 import { registerStatsRoutes } from './connectors/stats-routes'
+import { createDialogueSource } from './connectors/dialogue-source'
+import { registerDialogueRoutes } from './connectors/dialogue-routes'
 import {
   installZcodeHooks,
   uninstallZcodeHooks,
@@ -235,6 +237,10 @@ async function bootstrap(): Promise<void> {
     log: (message) => console.log(message),
   })
   registerStatsRoutes({ webServer: server.webServer }, { snapshot: (since) => statsLedger.snapshot(since) })
+  // Phase 10 second batch: reply-text previews from the zcode rollout files
+  // (on-demand read, truncated at the source — the one content-level channel).
+  const dialogueSource = createDialogueSource({ cliDir: () => join(homedir(), '.zcode', 'cli'), now: () => Date.now() })
+  registerDialogueRoutes({ webServer: server.webServer }, { source: dialogueSource })
   const zcodeEnabled = (): boolean => settingsStore?.get().connectors.zcode.enabled ?? true
   const syncZcodeCfgFiles = (): Promise<void> => {
     if (!zcodeEnabled() || server === null) return Promise.resolve()

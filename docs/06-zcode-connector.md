@@ -174,3 +174,7 @@ DSH 桥的 `tool/call` arguments 本就带载荷，后续可从桥侧喂同一�
 - `line-count.ts`（纯函数：LCS 行 diff + 补丁/多编辑解析 + 1M cell 兜底）、
   `stats-ledger.ts`、`stats-routes.ts`；渲染层 `companions/bubbles/`
   （BubbleHost/样式/动画注册表）+ `companions/stats-hud/`。
+
+### 8.5 对话数据通道（第二批）
+
+回复文本不经过 hooks（Stop stdin 无文本、临时 transcript 用后即删）：读 zcode 持久化的 （AI-SDK 形状，finishReason+text+turnId）。坑：单行内嵌完整请求上下文，长会话 >1MB/行（实测 10MB 文件）——固定尾窗必漏最后一行 stop；实现为 readline 流式前扫 +  子串预过滤，只有候选行才 JSON.parse。归约边界：markdown 剥离 + 160 字截断，零持久化， 按需读。全链路唯一内容级通道（用户拍板的隐私面例外，与 §8.3 的计数不变量并行不悖）。
