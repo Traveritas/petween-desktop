@@ -361,7 +361,11 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
 
   return {
     spawn(spec) {
-      const existing = entries.find((entry) => entry.key === spec.key)
+      // Key reuse must skip EXITING entries: a dying bubble (hold + exit
+      // animation ≈ 2.5s with 随风) would otherwise swallow the successor's
+      // spawn — content re-rendered onto a fading element and no live bubble
+      // (verified live: agent tool cadence of 1–3s hit this constantly).
+      const existing = entries.find((entry) => entry.key === spec.key && !entry.closing)
       if (existing !== undefined) {
         handleFor(existing).update(spec.content)
         return handleFor(existing)
