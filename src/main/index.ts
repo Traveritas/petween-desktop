@@ -325,6 +325,12 @@ async function bootstrap(): Promise<void> {
     void server?.close().catch(() => {})
     settingsStore?.flushSync()
   })
+
+  // TEMP repro hook (reverted after the quit-error diagnosis): auto-quit to
+  // exercise the full quit path headlessly.
+  if (process.env.PETWEEN_QUIT_AFTER_MS !== undefined) {
+    setTimeout(() => app.quit(), Number(process.env.PETWEEN_QUIT_AFTER_MS))
+  }
 }
 
 async function runLegacyImport(

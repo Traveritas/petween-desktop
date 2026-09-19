@@ -72,6 +72,8 @@ function fakeWindow(): BrowserWindow {
     webContents,
     setIgnoreMouseEvents: electronMocks.setIgnoreMouseEvents,
     getContentBounds: () => ({ x: 0, y: 0, width: 2560, height: 1600 }),
+    // The quit-time guards ask before touching the window.
+    isDestroyed: () => false,
   } as unknown as BrowserWindow
 }
 

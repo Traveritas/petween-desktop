@@ -72,7 +72,14 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
   let prevDragging = false
   let interactiveLock = false
 
+  // Captured ONCE: reading `win.webContents` on a destroyed window throws
+  // "Object has been destroyed" (the quit-time 'closed' handler runs dispose
+  // after the window is gone — the stored reference keeps removeListener
+  // working; a destroyed EventEmitter accepts removal fine).
+  const webContents = win.webContents
+
   const apply = (): void => {
+    if (win.isDestroyed()) return // quit-time ticks must not touch the dead window
     const target = interactiveLock || state.interactive
     if (applied === target) return
     applied = target
@@ -82,6 +89,7 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
   }
 
   const evaluate = (): void => {
+    if (win.isDestroyed()) return
     const cursor = screen.getCursorScreenPoint()
     const bounds = win.getContentBounds()
     state = decideInteractive(
@@ -106,7 +114,7 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
   }
 
   const onSignal = (event: IpcMainEvent, payload: unknown): void => {
-    if (event.sender !== win.webContents) return
+    if (event.sender !== webContents) return
     const sanitized = sanitizeSignal(payload)
     if (sanitized === null) return
     if (prevDragging && !sanitized.dragging) reissue() // drag end: re-anchor the hit region (#41501 family)
@@ -121,10 +129,10 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
     applied = null
     evaluate()
   }
-  win.webContents.on('did-finish-load', onFinishedLoad)
+  webContents.on('did-finish-load', onFinishedLoad)
 
   const onRenderGone = (): void => reissue()
-  win.webContents.on('render-process-gone', onRenderGone)
+  webContents.on('render-process-gone', onRenderGone)
 
   const onPowerResume = (): void => reissue()
   powerMonitor.on('resume', onPowerResume)
@@ -139,7 +147,7 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
       '[petween-desktop] DevTools is open — the transparent overlay stops being transparent and click-through cannot be tested. Detach/close DevTools before verifying.',
     )
   }
-  win.webContents.on('devtools-opened', onDevToolsOpened)
+  webContents.on('devtools-opened', onDevToolsOpened)
 
   const timer = setInterval(evaluate, POLL_MS)
   let selfHealTimer: ReturnType<typeof setInterval> | null =
@@ -176,9 +184,9 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
       clearInterval(timer)
       if (selfHealTimer !== null) clearInterval(selfHealTimer)
       ipcMain.removeListener(POINTER_SIGNAL_CHANNEL, onSignal)
-      win.webContents.removeListener('did-finish-load', onFinishedLoad)
-      win.webContents.removeListener('render-process-gone', onRenderGone)
-      win.webContents.removeListener('devtools-opened', onDevToolsOpened)
+      webContents.removeListener('did-finish-load', onFinishedLoad)
+      webContents.removeListener('render-process-gone', onRenderGone)
+      webContents.removeListener('devtools-opened', onDevToolsOpened)
       powerMonitor.removeListener('resume', onPowerResume)
       screen.removeListener('display-metrics-changed', onDisplayMetrics)
       screen.removeListener('display-added', onDisplayMetrics)
