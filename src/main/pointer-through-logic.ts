@@ -42,6 +42,13 @@ export const DEFAULT_POINTER_OPTIONS: PointerThroughOptions = {
 
 export interface PointerThroughState {
   interactive: boolean
+  /**
+   * Cursor within the pet's proximity band. Governs whether the overlay may
+   * keep the forwarding hook installed (see FORWARD_*_MARGIN_PX) — the hook
+   * is the known cause of cursor flicker in sibling windows, so it must only
+   * live near the pet.
+   */
+  near: boolean
   /** Last known client-space body rect (persists between renderer signals). */
   bodyRect: Rect | null
 }
@@ -66,6 +73,16 @@ export const SIGNAL_FRESH_MS = 800
 /** Dragging keeps authority a little longer — a mid-drag stall must not drop the gesture. */
 export const DRAG_HOLD_MS = 2000
 
+/**
+ * Forward band margins (px): forwarding (a system-wide WH_MOUSE_LL hook —
+ * the known "setIgnoreMouseEvents on Windows / flickering cursor" trigger)
+ * stays installed only while the cursor is within the pet's rect expanded by
+ * ENTER; once near, it survives until the cursor leaves EXIT (> enter =
+ * hysteresis against rapid hook install/uninstall at the band edge).
+ */
+export const FORWARD_ENTER_MARGIN_PX = 96
+export const FORWARD_EXIT_MARGIN_PX = 128
+
 function pointInRect(point: { x: number; y: number }, rect: Rect, margin: number): boolean {
   return (
     point.x >= rect.x - margin &&
@@ -83,11 +100,14 @@ export function decideInteractive(
   const bodyRect = inputs.signal?.bodyRect ?? state.bodyRect
 
   if (options.mode === 'always-through') {
-    return { interactive: false, bodyRect }
+    // Pure click-through: never interactive, and never in the forward band —
+    // no forwarding hook at all in this mode.
+    return { interactive: false, near: false, bodyRect }
   }
 
   // AUTO: the cursor poll — works with zero renderer cooperation.
   let interactive = false
+  let near = false
   if (bodyRect !== null && inputs.cursorScreen !== null) {
     const screenRect: Rect = {
       x: bodyRect.x + inputs.contentOrigin.x,
@@ -97,6 +117,8 @@ export function decideInteractive(
     }
     const margin = state.interactive ? options.hitPaddingPx : 0
     interactive = pointInRect(inputs.cursorScreen, screenRect, margin)
+    const nearMargin = state.near ? FORWARD_EXIT_MARGIN_PX : FORWARD_ENTER_MARGIN_PX
+    near = pointInRect(inputs.cursorScreen, screenRect, nearMargin)
   }
 
   // Fresh renderer signals refine the poll outcome.
@@ -107,7 +129,10 @@ export function decideInteractive(
     // A fresh hoverHit=false keeps the (hysteresis-qualified) poll verdict:
     // exiting is the poll's call, so transparent image margins near the body
     // do not flap the state.
+    // Signals only arrive while forwarding (inside the band) or interactive,
+    // so a fresh signal also proves proximity.
+    if (age <= SIGNAL_FRESH_MS && (inputs.signal.hoverHit || inputs.signal.dragging)) near = true
   }
 
-  return { interactive, bodyRect }
+  return { interactive, near, bodyRect }
 }

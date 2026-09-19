@@ -12,7 +12,7 @@ import {
 } from '../../src/main/pointer-through-logic'
 
 const RECT = { x: 600, y: 400, width: 96, height: 96 }
-const THROUGH: PointerThroughState = { interactive: false, bodyRect: null }
+const THROUGH: PointerThroughState = { interactive: false, near: false, bodyRect: null }
 
 function inputs(overrides: Partial<Parameters<typeof decideInteractive>[0]> = {}) {
   return {
@@ -232,5 +232,67 @@ describe('drag hold', () => {
       { interactive: true, bodyRect: null },
     )
     expect(dead.interactive).toBe(false)
+  })
+})
+
+describe('forward band (near)', () => {
+  // The band governs whether the mouse-forwarding hook may stay installed:
+  // near the pet only (the hook is the known sibling-window cursor-flicker
+  // trigger, so it must not live app-lifetime).
+  const withRect = (cursorX: number, cursorY: number, state: PointerThroughState = THROUGH) =>
+    decideInteractive(
+      inputs({ cursorScreen: { x: cursorX, y: cursorY }, signal: { hoverHit: false, dragging: false, bodyRect: RECT } }),
+      state,
+    )
+
+  it('inside the pet rect → near (forwarding allowed)', () => {
+    expect(withRect(RECT.x + RECT.width / 2, RECT.y + RECT.height / 2).near).toBe(true)
+  })
+
+  it('inside the enter margin (96px) but outside the rect → near, not interactive', () => {
+    const state = withRect(RECT.x - 80, RECT.y + RECT.height / 2)
+    expect(state.near).toBe(true)
+    expect(state.interactive).toBe(false)
+  })
+
+  it('beyond the enter margin → not near (pure click-through, no hook)', () => {
+    expect(withRect(RECT.x - 200, RECT.y).near).toBe(false)
+  })
+
+  it('hysteresis: near survives until the wider exit margin (128px)', () => {
+    const near = withRect(RECT.x - 80, RECT.y) // entered the band
+    expect(near.near).toBe(true)
+    // between enter (96) and exit (128): still near while already near
+    expect(withRect(RECT.x - 110, RECT.y, near).near).toBe(true)
+    // past the exit margin: band released
+    expect(withRect(RECT.x - 200, RECT.y, near).near).toBe(false)
+    // and re-entering requires the tighter enter margin again
+    expect(withRect(RECT.x - 110, RECT.y, withRect(RECT.x - 200, RECT.y, near)).near).toBe(false)
+  })
+
+  it('no rect or no cursor → never near', () => {
+    expect(decideInteractive(inputs({ cursorScreen: null }), THROUGH).near).toBe(false)
+    expect(decideInteractive(inputs(), THROUGH).near).toBe(false)
+  })
+
+  it('always-through never enters the band (no hook in that mode)', () => {
+    const state = decideInteractive(
+      inputs({
+        cursorScreen: { x: RECT.x + 48, y: RECT.y + 48 },
+        signal: { hoverHit: false, dragging: false, bodyRect: RECT },
+      }),
+      THROUGH,
+      { mode: 'always-through', hitPaddingPx: 6 },
+    )
+    expect(state.near).toBe(false)
+    expect(state.interactive).toBe(false)
+  })
+
+  it('a fresh hover signal proves proximity (near even without the poll)', () => {
+    const state = decideInteractive(
+      inputs({ signal: { hoverHit: true, dragging: false, bodyRect: null }, signalAt: 1_000_000 }),
+      THROUGH,
+    )
+    expect(state.near).toBe(true)
   })
 })

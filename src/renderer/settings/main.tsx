@@ -417,7 +417,7 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
 
       <Toggle
         label="鼠标移动转发"
-        hint="关闭则仅用光标轮询（其他应用拖动窗口闪烁时可关闭）"
+        hint="仅在宠物附近启用（约 96px 内）；关闭则全程只用光标轮询。转发用系统级鼠标钩子，已知的其他窗口光标闪烁问题只在钩子常驻时出现"
         checked={ct.forwardMouseMoves}
         onChange={(next) => props.patch({ clickThrough: { forwardMouseMoves: next } })}
       />

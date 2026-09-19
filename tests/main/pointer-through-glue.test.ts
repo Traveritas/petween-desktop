@@ -109,9 +109,20 @@ afterEach(() => {
 })
 
 describe('pointer-through glue', () => {
-  it('applies click-through with forwarding at attach', () => {
+  it('applies PLAIN click-through at attach (no forwarding hook far from the pet)', () => {
     const win = fakeWindow()
     handle = attachPointerThrough(win, { mode: 'auto', hitPaddingPx: 6, forwardMouseMoves: true, selfHealing: false })
+    // no bodyRect + cursor far → the near band never opens: no hook.
+    expect(calls().at(-1)![0]).toBe(true)
+    expect(calls().at(-1)![1]).toBeUndefined()
+  })
+
+  it('a bodyRect near the cursor opens the forward band (hook installs)', () => {
+    const win = fakeWindow()
+    handle = attachPointerThrough(win, { mode: 'auto', hitPaddingPx: 6, forwardMouseMoves: true, selfHealing: false })
+    electronMocks.setIgnoreMouseEvents.mockClear()
+    // cursor (0,0) via mock; a rect around it makes the poll near.
+    emit(win, { hoverHit: false, dragging: false, bodyRect: { x: 20, y: 20, width: 100, height: 100 } })
     expect(calls().at(-1)).toEqual([true, { forward: true }])
   })
 
@@ -147,24 +158,29 @@ describe('pointer-through glue', () => {
     // the re-anchor forces a redundant native call even though state changed
     expect(calls().length).toBeGreaterThanOrEqual(1)
     expect(lastIgnore()).toBe(true) // gesture over → back to click-through
-    expect(calls().at(-1)![1]).toEqual({ forward: true })
+    expect(calls().at(-1)![1]).toBeUndefined() // far from the pet: plain, no hook
   })
 
   it('the interactive lock overrides always-through', () => {
     const win = fakeWindow()
     handle = attachPointerThrough(win, { mode: 'always-through', hitPaddingPx: 6, forwardMouseMoves: true, selfHealing: false })
-    expect(calls().at(-1)).toEqual([true, { forward: true }])
+    expect(calls().at(-1)![0]).toBe(true)
+    expect(calls().at(-1)![1]).toBeUndefined() // always-through: never a hook
     handle.setInteractiveLock(true)
     expect(lastIgnore()).toBe(false)
     handle.toggleInteractiveLock()
-    expect(calls().at(-1)).toEqual([true, { forward: true }])
+    expect(calls().at(-1)![0]).toBe(true)
+    expect(calls().at(-1)![1]).toBeUndefined()
   })
 
-  it('updateOptions re-issues with the new forward flag', () => {
+  it('updateOptions turns forwarding off inside the band (plain everywhere)', () => {
     const win = fakeWindow()
     handle = attachPointerThrough(win, { mode: 'auto', hitPaddingPx: 6, forwardMouseMoves: true, selfHealing: false })
+    emit(win, { hoverHit: false, dragging: false, bodyRect: { x: 20, y: 20, width: 100, height: 100 } })
+    expect(calls().at(-1)).toEqual([true, { forward: true }]) // in-band: hook on
     handle.updateOptions({ mode: 'auto', hitPaddingPx: 6, forwardMouseMoves: false, selfHealing: false })
-    expect(calls().at(-1)).toEqual([true, { forward: false }])
+    expect(calls().at(-1)![0]).toBe(true)
+    expect(calls().at(-1)![1]).toBeUndefined() // setting off: hook never installs
   })
 
   it('self-healing re-asserts periodically', () => {

@@ -65,8 +65,12 @@ export interface PointerThroughRuntimeOptions extends PointerThroughOptions {
 
 export function attachPointerThrough(win: BrowserWindow, initial: PointerThroughRuntimeOptions): PointerThroughHandle {
   let options = initial
-  let state: PointerThroughState = { interactive: false, bodyRect: null }
-  let applied: boolean | null = null
+  let state: PointerThroughState = { interactive: false, near: false, bodyRect: null }
+  /** 'forward' keeps the mouse-forwarding hook (near the pet only); 'plain'
+   *  is pure click-through — the hook is the known cause of cursor flicker
+   *  in sibling windows ("setIgnoreMouseEvents on Windows / flickering
+   *  cursor"), so it must not stay installed app-lifetime. */
+  let applied: 'interactive' | 'forward' | 'plain' | null = null
   let signal: RendererSignal | null = null
   let signalAt: number | null = null
   let prevDragging = false
@@ -80,12 +84,23 @@ export function attachPointerThrough(win: BrowserWindow, initial: PointerThrough
 
   const apply = (): void => {
     if (win.isDestroyed()) return // quit-time ticks must not touch the dead window
-    const target = interactiveLock || state.interactive
-    if (applied === target) return
-    applied = target
-    console.log(`[petween-desktop] pointer-through: ${target ? 'interactive' : 'click-through'}`)
-    if (target) win.setIgnoreMouseEvents(false)
-    else win.setIgnoreMouseEvents(true, { forward: options.forwardMouseMoves })
+    const next: 'interactive' | 'forward' | 'plain' = interactiveLock || state.interactive
+      ? 'interactive'
+      : options.forwardMouseMoves && state.near
+        ? 'forward'
+        : 'plain'
+    if (applied === next) return
+    applied = next
+    if (next === 'interactive') {
+      console.log('[petween-desktop] pointer-through: interactive')
+      win.setIgnoreMouseEvents(false)
+    } else if (next === 'forward') {
+      console.log('[petween-desktop] pointer-through: click-through (+forward, near pet)')
+      win.setIgnoreMouseEvents(true, { forward: true })
+    } else {
+      console.log('[petween-desktop] pointer-through: click-through')
+      win.setIgnoreMouseEvents(true)
+    }
   }
 
   const evaluate = (): void => {

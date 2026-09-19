@@ -331,6 +331,7 @@ async function bootstrap(): Promise<void> {
   if (process.env.PETWEEN_QUIT_AFTER_MS !== undefined) {
     setTimeout(() => app.quit(), Number(process.env.PETWEEN_QUIT_AFTER_MS))
   }
+
 }
 
 async function runLegacyImport(
