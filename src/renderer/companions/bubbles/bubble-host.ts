@@ -11,7 +11,11 @@
  * (trust the snapshot, never vision).
  */
 import { getBubbleStyle, type BubbleContent, type BubbleStyle } from './styles'
-import { BUBBLE_EXIT_MS, getBubbleAnimation } from './animations'
+import {
+  BUBBLE_EXIT_MS,
+  getBubbleEnterAnimation,
+  getBubbleExitAnimation,
+} from './animations'
 
 export interface BubbleAnchor {
   /** Viewport CSS px; the pet's bounding box (stageSize × scale at x/y). */
@@ -35,7 +39,8 @@ export interface BubbleHandle {
 export interface BubbleSpawnSpec {
   key: string
   styleId?: string
-  animationId?: string
+  enterAnimationId?: string
+  exitAnimationId?: string
   content: BubbleContent
 }
 
@@ -61,6 +66,8 @@ interface BubbleEntry {
   key: string
   el: HTMLElement
   style: BubbleStyle
+  /** Removed on close so enter and exit never share the animation property. */
+  enterClass: string
   closing: boolean
   closed: boolean
   removeTimer: ReturnType<typeof setTimeout> | null
@@ -132,9 +139,9 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
     close() {
       if (entry.closing || entry.closed || disposed) return
       entry.closing = true
-      const animation = getBubbleAnimation(entry.el.dataset.ptAnimation)
-      entry.el.classList.remove('pt-bubble--bump')
-      entry.el.classList.add(animation.exitClass)
+      const exit = getBubbleExitAnimation(entry.el.dataset.ptExitAnimation)
+      entry.el.classList.remove('pt-bubble--bump', entry.enterClass)
+      entry.el.classList.add(exit.className)
       entry.removeTimer = setTimeout(() => {
         entry.closed = true
         removeEntry(entry)
@@ -183,13 +190,14 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
         return handleFor(existing)
       }
       const style = getBubbleStyle(spec.styleId)
-      const animation = getBubbleAnimation(spec.animationId)
+      const enter = getBubbleEnterAnimation(spec.enterAnimationId)
+      const exit = getBubbleExitAnimation(spec.exitAnimationId)
       const el = document.createElement('div')
-      el.className = `pt-bubble ${style.className} ${animation.enterClass}`
-      el.dataset.ptAnimation = animation.id
+      el.className = `pt-bubble ${style.className} ${enter.className}`
+      el.dataset.ptExitAnimation = exit.id
       style.render(el, spec.content)
       container.appendChild(el)
-      const entry: BubbleEntry = { key: spec.key, el, style, closing: false, closed: false, removeTimer: null }
+      const entry: BubbleEntry = { key: spec.key, el, style, enterClass: enter.className, closing: false, closed: false, removeTimer: null }
       entries.unshift(entry)
       // Evict beyond capacity: oldest live bubble (end of the list), never
       // one already exiting — those are about to free their slot.

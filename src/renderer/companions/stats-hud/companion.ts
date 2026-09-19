@@ -15,7 +15,11 @@ import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import type { StatsSnapshot } from '../../../main/connectors/stats-ledger'
 import { createBubbleHost, type BubbleHandle } from '../bubbles/bubble-host'
 import { formatDuration, listBubbleStyles } from '../bubbles/styles'
-import { listBubbleAnimations } from '../bubbles/animations'
+import {
+  LEGACY_BUNDLED_EXITS,
+  listBubbleEnterAnimations,
+  listBubbleExitAnimations,
+} from '../bubbles/animations'
 import { createHudReducer, DEFAULT_HUD_OPTIONS, type HudCommand, type HudOptions } from './hud-logic'
 import { StatsHudCard } from './settings-card'
 
@@ -24,7 +28,8 @@ export const STATS_HUD_ID = 'stats-hud'
 /** Stored under desktop-settings companions.options['stats-hud']. */
 export interface StatsHudOptions extends HudOptions {
   styleId?: string
-  animationId?: string
+  enterAnimationId?: string
+  exitAnimationId?: string
 }
 
 const STATS_POLL_MS = 400
@@ -36,14 +41,23 @@ const clampMin = (value: unknown, fallback: number, min: number): number =>
 
 function normalizeOptions(raw: unknown): StatsHudOptions {
   const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
-  return {
-    styleId: typeof bag.styleId === 'string' ? bag.styleId : undefined,
-    animationId: typeof bag.animationId === 'string' ? bag.animationId : undefined,
+  const asId = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
+  const options: StatsHudOptions = {
+    styleId: asId(bag.styleId),
+    enterAnimationId: asId(bag.enterAnimationId),
+    exitAnimationId: asId(bag.exitAnimationId),
     thinkingShowThresholdMs: clampMin(bag.thinkingShowThresholdMs, DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs, 0),
     thinkingHoldMs: clampMin(bag.thinkingHoldMs, DEFAULT_HUD_OPTIONS.thinkingHoldMs, 0),
     editHoldMs: clampMin(bag.editHoldMs, DEFAULT_HUD_OPTIONS.editHoldMs, 0),
     editMaxAgeMs: clampMin(bag.editMaxAgeMs, DEFAULT_HUD_OPTIONS.editMaxAgeMs, 0),
   }
+  // v0.2.3 stored one bundled `animationId`; migrate it to the same look.
+  const legacy = asId(bag.animationId)
+  if (legacy !== undefined) {
+    if (options.enterAnimationId === undefined) options.enterAnimationId = legacy
+    if (options.exitAnimationId === undefined) options.exitAnimationId = LEGACY_BUNDLED_EXITS[legacy]
+  }
+  return options
 }
 
 interface LiveThinking {
@@ -96,7 +110,8 @@ export function createStatsHudCompanion(): DesktopCompanion {
       }
 
       const styleId = (): string | undefined => options.styleId
-      const animationId = (): string | undefined => options.animationId
+      const enterAnimationId = (): string | undefined => options.enterAnimationId
+      const exitAnimationId = (): string | undefined => options.exitAnimationId
 
       const execute = (command: HudCommand): void => {
         switch (command.type) {
@@ -106,7 +121,8 @@ export function createStatsHudCompanion(): DesktopCompanion {
             const handle = host.spawn({
               key,
               styleId: styleId(),
-              animationId: animationId(),
+              enterAnimationId: enterAnimationId(),
+              exitAnimationId: exitAnimationId(),
               content: { kind: 'thinking', sessionId: command.sessionId, startedAt: command.startedAt },
             })
             thinking = { handle, startedAt: command.startedAt, finalMs: null }
@@ -132,7 +148,8 @@ export function createStatsHudCompanion(): DesktopCompanion {
             editHandle = host.spawn({
               key,
               styleId: styleId(),
-              animationId: animationId(),
+              enterAnimationId: enterAnimationId(),
+              exitAnimationId: exitAnimationId(),
               content: { kind: 'edit', sessionId: command.sessionId, added: command.added, removed: command.removed, files: command.files },
             })
             break
@@ -201,8 +218,11 @@ export function createStatsHudCompanion(): DesktopCompanion {
             if (next.styleId !== undefined && !listBubbleStyles().some((style) => style.id === next.styleId)) {
               next.styleId = undefined
             }
-            if (next.animationId !== undefined && !listBubbleAnimations().some((animation) => animation.id === next.animationId)) {
-              next.animationId = undefined
+            if (next.enterAnimationId !== undefined && !listBubbleEnterAnimations().some((animation) => animation.id === next.enterAnimationId)) {
+              next.enterAnimationId = undefined
+            }
+            if (next.exitAnimationId !== undefined && !listBubbleExitAnimations().some((animation) => animation.id === next.exitAnimationId)) {
+              next.exitAnimationId = undefined
             }
             options = next
           })

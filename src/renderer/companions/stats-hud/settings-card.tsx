@@ -10,20 +10,21 @@
  */
 import { useEffect, useState, type CSSProperties } from 'react'
 import { listBubbleStyles } from '../bubbles/styles'
-import { listBubbleAnimations } from '../bubbles/animations'
+import { listBubbleEnterAnimations, listBubbleExitAnimations } from '../bubbles/animations'
 import { DEFAULT_HUD_OPTIONS } from './hud-logic'
 import { STATS_HUD_ID } from './companion'
 
 interface OptionBag {
   styleId?: string
-  animationId?: string
+  enterAnimationId?: string
+  exitAnimationId?: string
   thinkingShowThresholdMs?: number
   thinkingHoldMs?: number
   editHoldMs?: number
   editMaxAgeMs?: number
 }
 
-const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'animationId'>> = {
+const DEFAULTS: Required<Omit<OptionBag, 'styleId' | 'enterAnimationId' | 'exitAnimationId'>> = {
   thinkingShowThresholdMs: DEFAULT_HUD_OPTIONS.thinkingShowThresholdMs,
   thinkingHoldMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs,
   editHoldMs: DEFAULT_HUD_OPTIONS.editHoldMs,
@@ -78,14 +79,27 @@ export function StatsHudCard(): JSX.Element {
             </option>
           ))}
         </select>
-        <span className="rowHint">动画</span>
+        <span className="rowHint">入场</span>
         <select
           style={selectStyle}
-          value={bag.animationId ?? ''}
-          onChange={(event) => patch({ animationId: event.target.value === '' ? undefined : event.target.value })}
+          value={bag.enterAnimationId ?? ''}
+          onChange={(event) => patch({ enterAnimationId: event.target.value === '' ? undefined : event.target.value })}
         >
-          <option value="">默认（{listBubbleAnimations()[0]?.label ?? '弹出'}）</option>
-          {listBubbleAnimations().map((animation) => (
+          <option value="">默认（{listBubbleEnterAnimations()[0]?.label ?? '弹出'}）</option>
+          {listBubbleEnterAnimations().map((animation) => (
+            <option key={animation.id} value={animation.id}>
+              {animation.label}
+            </option>
+          ))}
+        </select>
+        <span className="rowHint">出场</span>
+        <select
+          style={selectStyle}
+          value={bag.exitAnimationId ?? ''}
+          onChange={(event) => patch({ exitAnimationId: event.target.value === '' ? undefined : event.target.value })}
+        >
+          <option value="">默认（{listBubbleExitAnimations()[0]?.label ?? '淡出'}）</option>
+          {listBubbleExitAnimations().map((animation) => (
             <option key={animation.id} value={animation.id}>
               {animation.label}
             </option>
