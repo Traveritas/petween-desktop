@@ -112,7 +112,7 @@
 
 ## Phase 7：桌面设置窗口与可调穿透（✅ 2026-09-14 完成；用户 2026-09-14 确认单窗方案、连接器暂缓）
 
-用户反馈驱动：桌面端需要自己的设置（Connect / 通用 / 穿透可调）；点击穿透体感从未成功（→ 已定位修复 flapping bug `aa263f3`：keep-alive 重申冻结的 hover 结论导致整窗抖动）；设置单窗 vs 双窗（→ 调研后拍板**单窗 + iframe 内嵌**）。
+用户反馈驱动：桌面端需要自己的设置（Connect / 通用 / 穿透可调）；点击穿透体感从未成功（→ 已定位修复 flapping bug `726209e`：keep-alive 重申冻结的 hover 结论导致整窗抖动）；设置单窗 vs 双窗（→ 调研后拍板**单窗 + iframe 内嵌**）。
 
 - [x] `desktop-settings.ts`：壳层设置存储（`userData/desktop-settings.json`，防抖持久化 + 变更订阅 + 严格归一化/夹取；**不碰 petween config**）
 - [x] `desktop-routes.ts`：`/api/petween-desktop/*`（settings GET/PUT、status、autolaunch GET/PUT、fix-interaction、dsh-test 探活）——设置页唯一传输通道（无 IPC），dev 走 proxy / prod 同源同一份代码；与 `/api/petween` 命名空间按段边界不冲突
@@ -437,7 +437,7 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 - [ ] 数据目录策略确认：独立 `userData/petween-home/` + 一次性从 `~/.dsh/petween` 导入（02 号文档 §4 的推荐）
 - [ ] 是否需要 macOS 支持（穿透/托盘 API 有平台差异，MVP 只验 Windows）
 
-## 2026-09-19（下午）：真机反馈修复批——三栏 DCC 布局重构 + 光标/预览两修（上游 `50942a5` / 桌面 `b7b524e`）
+## 2026-09-19（下午）：真机反馈修复批——三栏 DCC 布局重构 + 光标/预览两修（上游 `50942a5` / 桌面 `9c678a7`）
 
 用户初测三问题，全部处理：
 
@@ -447,11 +447,11 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 
 上游 1111 / 桌面 194 用例全绿。**真机复验待用户**（重装 dist 或 dev）。
 
-- **补记（同日第二轮）**：光标闪动第一轮修复无效；改证据法——CDP 命中测试逐 2px 采样光标地图，真根因=lanes 面板 8px 内边距环与轨道间 2px 接缝全是 `auto`。修复：面板表面统一 crosshair（`.timelineLanes`/`.timelineRow`），标签列显式 default（上游 `f21d904` / 桌面 `10b9a3f`）。复测地图干净。
+- **补记（同日第二轮）**：光标闪动第一轮修复无效；改证据法——CDP 命中测试逐 2px 采样光标地图，真根因=lanes 面板 8px 内边距环与轨道间 2px 接缝全是 `auto`。修复：面板表面统一 crosshair（`.timelineLanes`/`.timelineRow`），标签列显式 default（上游 `f21d904` / 桌面 `fef3cdc`）。复测地图干净。
 
-- **退出报错修复（同日）**：用户报每次退出弹「A JavaScript error occurred in the main process — TypeError: Object has been destroyed」。栈指向 overlay `closed` 处理器 → pointer-through.dispose：dispose 读取已销毁窗口的 `win.webContents`（Electron 在 destroyed 窗口上抛错）。修复：attach 时捕获 webContents 引用（destroyed EventEmitter 仍可 removeListener）+ apply/evaluate 加 `win.isDestroyed()` 守卫（`5bd22c0`）。复现钩子 `PETWEEN_QUIT_AFTER_MS`（env 触发 app.quit，留在代码里补退出路径冒烟盲区——修复前自动退出卡在报错对话框 3 僵尸进程，修复后干净退出零输出）。注意：此 bug 自 Phase 3 就潜伏，退出冒烟此前从未自动化过。（✅ 用户真机复验：退出无报错。）
+- **退出报错修复（同日）**：用户报每次退出弹「A JavaScript error occurred in the main process — TypeError: Object has been destroyed」。栈指向 overlay `closed` 处理器 → pointer-through.dispose：dispose 读取已销毁窗口的 `win.webContents`（Electron 在 destroyed 窗口上抛错）。修复：attach 时捕获 webContents 引用（destroyed EventEmitter 仍可 removeListener）+ apply/evaluate 加 `win.isDestroyed()` 守卫（`bd31993`）。复现钩子 `PETWEEN_QUIT_AFTER_MS`（env 触发 app.quit，留在代码里补退出路径冒烟盲区——修复前自动退出卡在报错对话框 3 僵尸进程，修复后干净退出零输出）。注意：此 bug 自 Phase 3 就潜伏，退出冒烟此前从未自动化过。（✅ 用户真机复验：退出无报错。）
 
-## 2026-09-19（傍晚）：光标闪动终局修复——转发钩子只在宠物近带常驻（`b584192`）
+## 2026-09-19（傍晚）：光标闪动终局修复——转发钩子只在宠物近带常驻（`a32e2e5`）
 
 三轮排查的完整弧线：①轨道区 CSS 补丁（必要不充分）→ ②预览容器统一 grab（修好宠物悬停闪）→ ③用户判别「只有 Petween 窗口闪/关宠物无效/所有自定义光标区域都闪」+ 上游证据锁定真根因：**`setIgnoreMouseEvents(true,{forward:true})` 的转发实现是系统级 WH_MOUSE_LL 钩子，常驻期间同应用 Chromium 窗口的异步光标判定被干扰**（Electron 已知 bug 族「setIgnoreMouseEvents on Windows / flickering cursor」；原生程序同步设光标故其他程序不闪；桌面宠物自身是钩子宿主故不闪；关宠物只隐藏精灵、overlay 窗口与钩子仍在故无效）。
 
