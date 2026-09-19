@@ -402,3 +402,5 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 上游 1111 / 桌面 194 用例全绿。**真机复验待用户**（重装 dist 或 dev）。
 
 - **补记（同日第二轮）**：光标闪动第一轮修复无效；改证据法——CDP 命中测试逐 2px 采样光标地图，真根因=lanes 面板 8px 内边距环与轨道间 2px 接缝全是 `auto`。修复：面板表面统一 crosshair（`.timelineLanes`/`.timelineRow`），标签列显式 default（上游 `f21d904` / 桌面 `10b9a3f`）。复测地图干净。
+
+- **退出报错修复（同日）**：用户报每次退出弹「A JavaScript error occurred in the main process — TypeError: Object has been destroyed」。栈指向 overlay `closed` 处理器 → pointer-through.dispose：dispose 读取已销毁窗口的 `win.webContents`（Electron 在 destroyed 窗口上抛错）。修复：attach 时捕获 webContents 引用（destroyed EventEmitter 仍可 removeListener）+ apply/evaluate 加 `win.isDestroyed()` 守卫（`5bd22c0`）。复现钩子 `PETWEEN_QUIT_AFTER_MS`（env 触发 app.quit，留在代码里补退出路径冒烟盲区——修复前自动退出卡在报错对话框 3 僵尸进程，修复后干净退出零输出）。注意：此 bug 自 Phase 3 就潜伏，退出冒烟此前从未自动化过。
