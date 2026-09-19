@@ -496,3 +496,17 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 **修复**：pointer-through 改三态机——`interactive`（宠物上/拖拽）/ `forward`（宠物包围盒 +96px 进带 / +128px 出带滞回，钩子只在带内安装）/ `plain`（纯穿透零钩子，默认态）。渲染侧既有 1s keep-alive 本就携带 bodyRect（不依赖鼠标事件），主进程轮询在无钩子时依然有新鲜几何；hover/拖拽精修只在带内生效。always-through 模式彻底不装钩子。设置页「鼠标移动转发」文案更新为近带语义。新增 forward-band 逻辑测试 7 例 + glue 三态断言，202 用例全绿。
 
 **✅ 2026-09-19 用户真机复验通过**：时间轴/文字/宠物悬停全部不再闪动，宠物交互正常。真机反馈修复批（光标三连修 + 预览收容 + 三栏重构 + 退出报错）全部关闭。
+
+## 2026-09-19（夜）：physics 可见像素碰撞箱——`collision.ignoreTransparentPixels`（上游 `0a83a24`，默认关）
+
+用户提问「碰撞箱能否忽略图片的透明像素 + 不同状态碰撞箱变化对 physics 的影响」。评估结论：引擎已有 bodyRect→insets 地基（剥掉 stage 方块 padding），但姿势图**文件内部**的透明边缘仍算碰撞；且 bounds 每帧按最新快照重算（为飞行中改缩放设计），状态/flashPose 换姿势中途换盒本就被支持——影响限于一次性夹持跳动（≤边距差）与落定后贴地漂移（锚点模型固有权衡），无稳定性风险。拍板：physics 仓内闭环（零 petween 改动）、默认关、保持逐帧重算。
+
+实现（全部在 petween-physics 0.3.0）：
+
+- `alpha-bounds.ts`：纯扫描器（alpha ≥ 阈值的紧致包围盒，归一化分数，L 形/离散斑点取并集盒）+ URL×阈值缓存扫描器工厂（≤512px 降采样封顶内存，失败不落缓存可重试）。姿势资产仅 PNG/WebP/JPEG 静态图，一次扫描即全量真值；JPEG 无 alpha → 全不透明 → 恰好空操作。
+- `pose-collision-bounds.ts`：(petId, poseKey) → `GET /api/petween/pets/<id>`（逐问取新 + 在飞去重；快照 poseKey 已是 fallback 解析后槽位，无需复刻主插件 fallback 链）→ `/petween-assets/<id>` → 扫描。任何失败静默 null，控制器回退图片盒。
+- `throw-controller.ts`：新增可选 `getPoseAlphaBounds` 接缝；insets 按分数×bodyRect 精修；拖拽起步预热（扫描赶在松手前落地）、姿势身份变化逐帧检测（覆盖飞行中换姿势）、陈旧答案守卫（换姿势竞态丢弃）、null 答案下个手势重问（资产晚导入可恢复）。
+- 配置 `collision` 分组：`ignoreTransparentPixels`（默认 false）+ `alphaThreshold`（1..255 整数，默认 1=只忽略全透明）；设置卡「碰撞箱」分组两行；§12 共享配置摘要标签同步。宿主 PUT 校验/repairConfig 走既有单表。
+- 双入口（DSH client + desktop companion）同 provider 接线，符合三纪律（扫描器为注入缝）。
+
+physics 190 用例全绿（基线 166 + 新 24：扫描器几何/阈值/缓存、provider 映射/新鲜度/不拒绝契约、控制器收紧/回退/陈旧/预热/飞行中换姿势）；桌面 bump 指针后 typecheck + 233 用例全绿。**真机验收待用户**：设置卡开「碰撞箱→忽略图片透明像素」→ 扔宠物观察贴墙/贴地间隙按可见像素、换状态/flashPose 切图后弹跳仍顺滑。
