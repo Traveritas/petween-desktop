@@ -137,6 +137,15 @@ export function renderReply(el: HTMLElement, content: Extract<BubbleContent, { k
   valueOf(el, '.pt-bubble__reply').textContent = content.text
 }
 
+/** The built-in skins are pure looks: every one renders with the shared
+ * kind renderers, so new styles stay CSS-only entries. */
+export function renderStandard(el: HTMLElement, content: BubbleContent): void {
+  if (content.kind === 'thinking') renderThinking(el, content)
+  else if (content.kind === 'turn') renderTurn(el, content)
+  else if (content.kind === 'reply') renderReply(el, content)
+  else renderEdit(el, content)
+}
+
 // --- Built-in styles ---------------------------------------------------------
 
 registerBubbleStyle({
@@ -179,12 +188,7 @@ registerBubbleStyle({
 }
 
 `,
-  render(el, content) {
-    if (content.kind === 'thinking') renderThinking(el, content)
-    else if (content.kind === 'turn') renderTurn(el, content)
-    else if (content.kind === 'reply') renderReply(el, content)
-    else renderEdit(el, content)
-  },
+  render: renderStandard,
 })
 
 registerBubbleStyle({
@@ -224,12 +228,7 @@ registerBubbleStyle({
 }
 
 `,
-  render(el, content) {
-    if (content.kind === 'thinking') renderThinking(el, content)
-    else if (content.kind === 'turn') renderTurn(el, content)
-    else if (content.kind === 'reply') renderReply(el, content)
-    else renderEdit(el, content)
-  },
+  render: renderStandard,
 })
 
 registerBubbleStyle({
@@ -268,10 +267,241 @@ registerBubbleStyle({
 }
 
 `,
-  render(el, content) {
-    if (content.kind === 'thinking') renderThinking(el, content)
-    else if (content.kind === 'turn') renderTurn(el, content)
-    else if (content.kind === 'reply') renderReply(el, content)
-    else renderEdit(el, content)
-  },
+  render: renderStandard,
+})
+
+// --- v0.3.15 styles: comic / memo / neon / ink -------------------------------
+
+registerBubbleStyle({
+  id: 'comic',
+  label: '漫画',
+  className: 'pt-bubble--comic',
+  css: `
+/* The classic speech bubble: paper + ink outline + a tail pointing at the
+   pet. The tail is a 45°-rotated square whose border-right/bottom form the
+   pointer V (the top vertex stays open so it merges into the bubble; the
+   opaque paper of the pseudo covers the parent's border seam behind it).
+   It repositions per placement: columns hang above the pet (tail bottom),
+   reply previews sit at the pet's left (tail right), turn summaries below
+   (tail top). */
+.pt-bubble--comic {
+  background: #fffdf6;
+  border: 2px solid #232a3d;
+  border-radius: 13px;
+  color: #232a3d;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 13px;
+  box-shadow: 2px 3px 0 rgba(35, 42, 61, 0.16);
+}
+.pt-bubble--comic::after {
+  content: '';
+  position: absolute;
+  bottom: -7.5px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  background: #fffdf6;
+  border-right: 2px solid #232a3d;
+  border-bottom: 2px solid #232a3d;
+  transform: translateX(-50%) rotate(45deg);
+}
+/* At the pet's left the tail points right: the rotated square's RIGHT
+   vertex is the pointer, so its two edges (top+right) carry the ink. */
+.pt-bubble--at-left.pt-bubble--comic::after {
+  bottom: auto;
+  left: auto;
+  right: -7.5px;
+  top: 50%;
+  border-right-width: 0;
+  border-bottom-width: 0;
+  border-top: 2px solid #232a3d;
+  border-right: 2px solid #232a3d;
+  transform: translateY(-50%) rotate(45deg);
+}
+/* Below the pet the tail points up: the TOP vertex is the pointer, edges
+   left+top. */
+.pt-bubble--at-below.pt-bubble--comic::after {
+  bottom: auto;
+  left: 50%;
+  top: -7.5px;
+  border-bottom-width: 0;
+  border-top: 2px solid #232a3d;
+  border-left: 2px solid #232a3d;
+  transform: translateX(-50%) rotate(45deg);
+}
+.pt-bubble--comic .pt-bubble__label { color: #6b7694; margin-right: 6px; font-weight: 600; }
+.pt-bubble--comic .pt-bubble__timer { font-variant-numeric: tabular-nums; font-weight: 700; }
+.pt-bubble--comic .pt-bubble__lines { font-variant-numeric: tabular-nums; font-weight: 700; }
+.pt-bubble--comic .pt-bubble__files { color: #6b7694; margin-left: 6px; font-weight: 400; }
+.pt-bubble--comic.pt-bubble--kind-reply {
+  border-radius: 15px;
+  padding: 10px 15px;
+  line-height: 1.55;
+  text-align: left;
+}
+.pt-bubble--comic.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.pt-bubble--comic.pt-bubble--kind-turn {
+  background: #fff6df;
+  border-radius: 15px;
+  padding: 8px 16px;
+}
+.pt-bubble--comic.pt-bubble--kind-turn::before { content: '\\2713  '; color: #2f9e63; }
+
+`,
+  render: renderStandard,
+})
+
+registerBubbleStyle({
+  id: 'memo',
+  label: '便签',
+  className: 'pt-bubble--memo',
+  // The tilt lives on the individual `rotate` property, NOT `transform` —
+  // the enter/exit keyframes own `transform` (and fill both), so a transform
+  // tilt would be overridden forever. Trade-off: 飘落/随风 sway also animates
+  // `rotate`, suppressing the tilt while they run; 弹出/升起/淡入/坠落 keep it.
+  css: `
+.pt-bubble--memo {
+  rotate: -1.6deg;
+  background: #fbf0c4;
+  border: 1px solid rgba(122, 100, 44, 0.28);
+  border-radius: 6px;
+  color: #4d4433;
+  font-family: 'Segoe Script', 'KaiTi', '楷体', cursive;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 8px 12px 7px;
+  box-shadow: 0 5px 14px rgba(120, 96, 40, 0.22);
+}
+.pt-bubble--memo::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 46px;
+  height: 15px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 1px 3px rgba(120, 96, 40, 0.2);
+  transform: translateX(-50%) rotate(-2.5deg);
+}
+.pt-bubble--memo .pt-bubble__label { color: #95834a; margin-right: 6px; }
+.pt-bubble--memo .pt-bubble__timer,
+.pt-bubble--memo .pt-bubble__lines { color: #a86e1f; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pt-bubble--memo .pt-bubble__files { color: #95834a; margin-left: 6px; }
+.pt-bubble--memo.pt-bubble--kind-reply {
+  border-radius: 8px;
+  padding: 10px 14px;
+  line-height: 1.6;
+  text-align: left;
+}
+.pt-bubble--memo.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+}
+.pt-bubble--memo.pt-bubble--kind-turn {
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+.pt-bubble--memo.pt-bubble--kind-turn::before { content: '\\2714  '; color: #4e8d5b; }
+
+`,
+  render: renderStandard,
+})
+
+registerBubbleStyle({
+  id: 'neon',
+  label: '霓虹',
+  className: 'pt-bubble--neon',
+  css: `
+.pt-bubble--neon {
+  background: rgba(7, 12, 24, 0.78);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(94, 230, 255, 0.5);
+  border-radius: 10px;
+  color: #e9fbff;
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 12px;
+  box-shadow:
+    0 0 10px rgba(94, 230, 255, 0.22),
+    inset 0 0 12px rgba(94, 230, 255, 0.1),
+    0 4px 18px rgba(0, 0, 0, 0.4);
+}
+.pt-bubble--neon .pt-bubble__label { color: #66d9f2; margin-right: 6px; text-shadow: 0 0 6px rgba(94, 230, 255, 0.45); }
+.pt-bubble--neon .pt-bubble__timer,
+.pt-bubble--neon .pt-bubble__lines { color: #8ef1ff; font-weight: 600; font-variant-numeric: tabular-nums; text-shadow: 0 0 7px rgba(94, 230, 255, 0.55); }
+.pt-bubble--neon .pt-bubble__files { color: #66d9f2; margin-left: 6px; opacity: 0.8; }
+.pt-bubble--neon.pt-bubble--kind-reply {
+  border-radius: 12px;
+  padding: 10px 14px;
+  line-height: 1.55;
+  text-align: left;
+}
+.pt-bubble--neon.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.pt-bubble--neon.pt-bubble--kind-turn {
+  border-radius: 12px;
+  padding: 8px 14px;
+  border-color: rgba(94, 230, 255, 0.65);
+}
+
+`,
+  render: renderStandard,
+})
+
+registerBubbleStyle({
+  id: 'ink',
+  label: '墨金',
+  className: 'pt-bubble--ink',
+  css: `
+.pt-bubble--ink {
+  background: #17181d;
+  border: 1px solid rgba(198, 162, 102, 0.3);
+  border-radius: 7px;
+  color: #efe8da;
+  font-family: Georgia, 'Times New Roman', 'SimSun', '宋体', serif;
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 13px;
+  box-shadow: inset 3px 0 0 0 #b28c4e, 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.pt-bubble--ink .pt-bubble__label { color: #c9a45c; margin-right: 7px; letter-spacing: 0.12em; }
+.pt-bubble--ink .pt-bubble__timer,
+.pt-bubble--ink .pt-bubble__lines { color: #f6efdd; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pt-bubble--ink .pt-bubble__files { color: #c9a45c; margin-left: 7px; opacity: 0.75; }
+.pt-bubble--ink.pt-bubble--kind-reply {
+  border-radius: 9px;
+  padding: 10px 15px;
+  line-height: 1.6;
+  text-align: left;
+}
+.pt-bubble--ink.pt-bubble--kind-reply .pt-bubble__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+.pt-bubble--ink.pt-bubble--kind-turn {
+  border-radius: 9px;
+  padding: 8px 16px;
+  box-shadow:
+    inset 3px 0 0 0 #b28c4e,
+    inset 0 1px 0 0 rgba(198, 162, 102, 0.5),
+    inset 0 -1px 0 0 rgba(198, 162, 102, 0.5),
+    0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+`,
+  render: renderStandard,
 })
