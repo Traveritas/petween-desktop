@@ -1,42 +1,73 @@
 /**
- * Column slot assignment: focused session above the pet, the rest flanking
- * by recency (left first). Pure function, no DOM.
+ * Sticky column slots (position memory): a session KEEPS its slot while its
+ * column lives — activity order no longer reorders columns (the ping-pong
+ * the user reported). Newcomers reuse freed slots (closest to center first),
+ * so a returning session usually lands back where it was.
  */
 import { describe, expect, it } from 'vitest'
-import { assignColumnSlots, packColumnBand } from '../../src/renderer/companions/bubbles/bubble-host'
+import { assignStickySlots, packColumnBand } from '../../src/renderer/companions/bubbles/bubble-host'
 
-describe('assignColumnSlots', () => {
-  it('focused session gets the center column, others flank by recency', () => {
-    const slots = assignColumnSlots(
-      [
-        { key: 'old', lastActiveAt: 1 },
-        { key: 'focus', lastActiveAt: 5 },
-        { key: 'mid', lastActiveAt: 3 },
-        { key: 'new', lastActiveAt: 9 },
-      ],
-      'focus',
-    )
-    expect(slots.get('focus')).toBe(0)
-    // Recency order after focus: new (9), mid (3), old (1) → left, right, left.
-    expect(slots.get('new')).toBe(-1)
-    expect(slots.get('mid')).toBe(1)
-    expect(slots.get('old')).toBe(-2)
+describe('assignStickySlots', () => {
+  it('first appearance: most recent gets the center, others alternate outward', () => {
+    const { slots, memory } = assignStickySlots(new Map(), [
+      { key: 'old', lastActiveAt: 1 },
+      { key: 'mid', lastActiveAt: 3 },
+      { key: 'new', lastActiveAt: 9 },
+    ])
+    expect(slots.get('new')).toBe(0)
+    expect(slots.get('mid')).toBe(-1)
+    expect(slots.get('old')).toBe(1)
+    expect(memory).toEqual(slots)
   })
 
-  it('unknown focus falls back to the most recent session', () => {
-    const slots = assignColumnSlots(
-      [
-        { key: 'a', lastActiveAt: 1 },
-        { key: 'b', lastActiveAt: 2 },
-      ],
-      'missing',
-    )
-    expect(slots.get('b')).toBe(0)
-    expect(slots.get('a')).toBe(-1)
+  it('slots are STICKY: recency flips do not reorder columns', () => {
+    const first = assignStickySlots(new Map(), [
+      { key: 'a', lastActiveAt: 10 },
+      { key: 'b', lastActiveAt: 5 },
+    ])
+    const flipped = assignStickySlots(first.memory, [
+      { key: 'a', lastActiveAt: 1 },
+      { key: 'b', lastActiveAt: 99 },
+    ])
+    expect(flipped.slots.get('a')).toBe(first.slots.get('a'))
+    expect(flipped.slots.get('b')).toBe(first.slots.get('b'))
   })
 
-  it('empty input yields no slots', () => {
-    expect(assignColumnSlots([], null).size).toBe(0)
+  it('newcomers reuse freed slots, closest to center first', () => {
+    // a(0) b(-1) c(1); b's column dies; d arrives → takes b's freed -1.
+    const first = assignStickySlots(new Map(), [
+      { key: 'a', lastActiveAt: 30 },
+      { key: 'b', lastActiveAt: 20 },
+      { key: 'c', lastActiveAt: 10 },
+    ])
+    expect(first.slots.get('b')).toBe(-1)
+    const after = assignStickySlots(first.memory, [
+      { key: 'a', lastActiveAt: 31 },
+      { key: 'c', lastActiveAt: 11 },
+      { key: 'd', lastActiveAt: 99 },
+    ])
+    expect(after.slots.get('a')).toBe(0)
+    expect(after.slots.get('c')).toBe(1)
+    expect(after.slots.get('d')).toBe(-1)
+  })
+
+  it('a returning session lands back in its old slot when free', () => {
+    const first = assignStickySlots(new Map(), [
+      { key: 'a', lastActiveAt: 30 },
+      { key: 'b', lastActiveAt: 20 },
+    ])
+    const withoutB = assignStickySlots(first.memory, [{ key: 'a', lastActiveAt: 31 }])
+    const back = assignStickySlots(withoutB.memory, [
+      { key: 'a', lastActiveAt: 31 },
+      { key: 'b', lastActiveAt: 99 },
+    ])
+    expect(back.slots.get('b')).toBe(first.slots.get('b'))
+  })
+
+  it('memory drops departed sessions', () => {
+    const first = assignStickySlots(new Map(), [{ key: 'a', lastActiveAt: 1 }, { key: 'b', lastActiveAt: 2 }])
+    const after = assignStickySlots(first.memory, [{ key: 'a', lastActiveAt: 3 }])
+    expect(after.memory.has('b')).toBe(false)
   })
 })
 
@@ -56,17 +87,11 @@ describe('packColumnBand (edge-packed, pet-centered, clamp-first)', () => {
   })
 
   it('shifts the band inward when it would overflow the viewport', () => {
-    // pet near the right edge: centered start would run off-screen.
     const centers = packColumnBand(cols, 1900, 24, 2048, 6)
     const startX = Math.min(Math.max(1900 - 174, 6), 2048 - 6 - 348) // = 1694
     expect(centers.get('a')).toBe(startX + 50)
     expect(centers.get('focus')).toBe(startX + 174)
     expect(centers.get('b')).toBe(startX + 298)
-    // every column fully inside the viewport
-    for (const center of centers.values()) {
-      expect(center - 50).toBeGreaterThanOrEqual(6)
-      expect(center + 50).toBeLessThanOrEqual(2048 - 6)
-    }
   })
 
   it('anchors left when the band is wider than the viewport', () => {

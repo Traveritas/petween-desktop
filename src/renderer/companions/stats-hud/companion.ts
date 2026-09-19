@@ -318,7 +318,6 @@ export function createStatsHudCompanion(): DesktopCompanion {
           .then((snapshot) => {
             if (disposed || snapshot === null) return
             cursor = snapshot.cursor
-            host.setFocusSession(snapshot.focusedSessionId)
             for (const command of reducer.apply(snapshot, Date.now())) execute(command)
           })
           .catch(() => {})

@@ -61,8 +61,6 @@ export interface BubbleSpawnSpec {
 export interface BubbleHost {
   spawn(spec: BubbleSpawnSpec): BubbleHandle
   find(key: string): BubbleHandle | null
-  /** The session whose column sits directly above the pet (null = first column). */
-  setFocusSession(sessionKey: string | null): void
   /** Bubbles per column (total is capped at 3× this). */
   setMaxBubbles(max: number): void
   /** Border-to-border gap between columns (px, user-adjustable). */
@@ -100,33 +98,57 @@ interface BubbleEntry {
 }
 
 /**
- * Column slots: focused session → 0; the rest sorted by recency alternate
- * outward (-1, +1, -2, +2 …). Slots only decide ORDER inside the band —
- * actual x positions come from packColumnBand (edge-packed, pet-centered).
- * Pure so the layout is unit-testable.
+ * STICKY column slots (position memory, user request v0.3.12): a session
+ * keeps its slot while its column lives, regardless of activity order —
+ * recency-ordered columns ping-pong when two sessions alternate (the
+ * taskbar's fixed-by-identity order, not alt-tab's MRU). Newcomers take
+ * freed slots first (closest to center), then fresh alternating slots. A
+ * session returning after its column died usually lands back where it was,
+ * because its freed slot is reused first. Slots only decide ORDER inside
+ * the band; x positions come from packColumnBand. Pure + memory-in/memory-out
+ * so it is unit-testable.
  */
-export function assignColumnSlots(
-  sessions: ReadonlyArray<{ key: string; lastActiveAt: number }>,
-  focused: string | null,
-): Map<string, number> {
+export function assignStickySlots(
+  memory: ReadonlyMap<string, number>,
+  live: ReadonlyArray<{ key: string; lastActiveAt: number }>,
+): { slots: Map<string, number>; memory: Map<string, number> } {
   const slots = new Map<string, number>()
-  if (sessions.length === 0) return slots
-  const ordered = [...sessions].sort((a, b) => b.lastActiveAt - a.lastActiveAt)
-  const focus = focused !== null && ordered.some((entry) => entry.key === focused) ? focused : ordered[0].key
-  slots.set(focus, 0)
+  for (const session of live) {
+    const remembered = memory.get(session.key)
+    if (remembered !== undefined) slots.set(session.key, remembered)
+  }
+  const used = new Set(slots.values())
+  // Slots freed by departed columns, closest to center first — reusing them
+  // gives returning sessions their old spot.
+  const freed = [...memory.entries()]
+    .filter(([key]) => !slots.has(key))
+    .map(([, slot]) => slot)
+    .filter((slot) => !used.has(slot))
+    .sort((a, b) => Math.abs(a) - Math.abs(b))
+  const newcomers = live
+    .filter((session) => !slots.has(session.key))
+    .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
   let nextNegative = -1
   let nextPositive = 1
-  for (const entry of ordered) {
-    if (entry.key === focus) continue
-    if (-nextNegative <= nextPositive) {
-      slots.set(entry.key, nextNegative)
-      nextNegative -= 1
-    } else {
-      slots.set(entry.key, nextPositive)
-      nextPositive += 1
+  const freshSlot = (): number => {
+    // The very first column sits at 0 (the band middle); then alternate.
+    if (!used.has(0)) {
+      used.add(0)
+      return 0
     }
+    while (used.has(nextNegative)) nextNegative -= 1
+    while (used.has(nextPositive)) nextPositive += 1
+    const slot = -nextNegative <= nextPositive ? nextNegative : nextPositive
+    if (slot === nextNegative) nextNegative -= 1
+    else nextPositive += 1
+    return slot
   }
-  return slots
+  for (const newcomer of newcomers) {
+    const slot = freed.length > 0 ? (freed.shift() as number) : freshSlot()
+    slots.set(newcomer.key, slot)
+    used.add(slot)
+  }
+  return { slots, memory: new Map(slots) }
 }
 
 /**
@@ -191,7 +213,8 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
   let columnGap = options.columnGapPx ?? 24
   const gap = options.gapPx ?? 6
   const margin = options.marginPx ?? 6
-  let focusedSession: string | null = null
+  /** Position memory: sessionKey → column slot, kept across layouts. */
+  let slotMemory = new Map<string, number>()
 
   const container = document.createElement('div')
   container.className = 'pt-bubbles'
@@ -345,7 +368,9 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
       lastActiveAt: Math.max(...column.map((entry) => entry.lastTouchedAt)),
     }))
     const petCenterX = anchor.x + anchor.width / 2
-    const slots = assignColumnSlots(sessions, focusedSession)
+    const sticky = assignStickySlots(slotMemory, sessions)
+    slotMemory = sticky.memory
+    const slots = sticky.slots
     const band = [...columns.entries()].map(([key, column]) => ({
       key,
       slot: slots.get(key) ?? 0,
@@ -424,12 +449,6 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
     find(key) {
       const entry = entries.find((candidate) => candidate.key === key)
       return entry === undefined || entry.closing ? null : handleFor(entry)
-    },
-
-    setFocusSession(sessionKey) {
-      if (focusedSession === sessionKey) return
-      focusedSession = sessionKey
-      layout()
     },
 
     setColumnGap(px) {
