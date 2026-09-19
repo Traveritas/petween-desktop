@@ -98,6 +98,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-19（泡泡反馈批 12，v0.3.11）**：随风/飘落动画按用户偏好退回 v0.3.8 版本（钟摆等幅摆动、640/1000ms）；高度包络两轮方案废弃（git 历史可回捞）。
 - **2026-09-19（泡泡反馈批 13，v0.3.12）**：列位置记忆——槽位按会话身份固定（任务栏模式，非 Alt-Tab MRU），活跃度不再重排列；新会话复用空槽（回位倾向）。焦点驱动布局移除。CDP 验证交替编辑三轮位置稳定。233 用例全绿。
 - **2026-09-19（夜）：physics 可见像素碰撞箱**（上游 `0a83a24`，physics 0.3.0，默认关）：`collision.ignoreTransparentPixels` + `alphaThreshold`——姿势图 alpha 紧致包围盒（canvas ≤512px 降采样扫描，URL×阈值缓存）在 bodyRect insets 之上再剥掉图片文件透明边缘；(petId,poseKey)→宠物记录（逐问取新）→资产 URL，零 petween 改动；拖拽起步预热/姿势身份逐帧检测/陈旧答案守卫。physics 190 + 桌面 233 用例全绿；**真机验收待用户**（详见 docs/05 同日节）。
+- **2026-09-19（穿透修复，v0.3.13）**：拖动/悬停宠物冻住其他应用动画的根因 = interactive 态 `setIgnoreMouseEvents(false)` 同时摘 `WS_EX_LAYERED`，全屏置顶窗遂成 Chromium 遮挡判定（`IsWindowVisibleAndFullyOpaque`）中的"完全不透明遮挡者"，底下 Chromium/CEF 应用渲染全停；样式恢复走裸 `SetWindowLong` 静默无事件，被冻结窗口又移出 LOCATIONCHANGE 钩子集合——只有切前台触发重算。修复 = overlay 创建后一次性 `setOpacity(254/255)` 钉住 Electron 内部 `layered_`（此后任何穿透模式保留 layered+alpha<255，永不算遮挡者）。隔离实验（不碰真 app）：受害者窗冻 9.5s→修复后 1.1s 恢复、透明像素无黑块。235 用例全绿（+overlay-window 2）；**真机验收待用户**（详见 docs/05 同日节）。
 - petween 基线：64 测试文件 / 1111 用例全绿（`50942a5` = V1.2 工作台 + P12 scrub/zoom + P13 多选/undo + P14 曲线编辑器；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：12 文件 / 190 用例（`0a83a24`）。
 
 ## 7. 给编码智能体的原则

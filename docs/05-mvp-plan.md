@@ -380,6 +380,10 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 
 用户报多会话时列间频繁换位。根因：列序按最近活跃度排，两会话交替干活即乒乓。业界共识（任务栏固定序 vs Alt-Tab MRU）按身份固定槽位。实现：assignStickySlots 纯函数（memory 进/出）——会话列存活期间槽位不变；新会话优先复用空出的槽（离中心近者优先，离开后回来的会话常落回原位），焦点不再驱动布局（setFocusSession 移除）。CDP 验证：两会话三轮交替编辑相对位置稳定（旁观真实会话进出不受扰）。
 
+### 真机反馈追加（2026-09-19，v0.3.13：拖宠物冻住全桌面动画的遮挡修复）
+
+用户报拖动宠物时其他应用动画全停、点到前台才恢复。**根因不是卡死，是 Chromium 原生窗口遮挡检测暂停渲染**：`setIgnoreMouseEvents(false)`（悬停/拖拽的 interactive 态）会把 `WS_EX_TRANSPARENT|WS_EX_LAYERED` 一起摘掉（electron `native_window_views.cc` SetIgnoreMouseEvents，内部 `layered_` 标志仅调过 setOpacity 才置位），全屏置顶窗于是满足 Chromium `IsWindowVisibleAndFullyOpaque`（`ui/gfx/win/hwnd_util.cc`）的"完全不透明遮挡者"条件，底下所有 Chromium/CEF 应用 PageVisibility=hidden、rAF/动画全停；而样式恢复走裸 `SetWindowLong`（静默、不产生 WinEvent），被冻结窗口又会被移出 LOCATIONCHANGE 钩子集合——光标划过救不活，只有 `EVENT_SYSTEM_FOREGROUND`（点击切前台）触发重算。修复 = overlay 创建后一次性 `setOpacity(254/255)`：置位 `layered_` 并设 LWA_ALPHA≈253，此后所有穿透模式保留 `WS_EX_LAYERED`，layered+alpha<255 在遮挡判定中永不算遮挡者；99.2% 不透明度不可感知。隔离实验（右下角 46s，rig 在 zcode exec/occl-test）：模拟窗 interactive 无 layered → 受害者窗 0.7s 内 hidden、rAF 冻 9.5s；setOpacity 后仍 interactive → 1.1s 恢复、透明像素无黑块、`layered_` 在后续模式切换中保留。顺带治好"悬停宠物期间其他应用短暂冻结"。235 壳层用例全绿（+overlay-window 2）。**真机验收待用户**：拖宠物时旁观应用（浏览器视频/动效）不再停。
+
 ### 后置项
 
 **主题级进出场复杂变换**（2026-09-19 评估后入 backlog）：BubbleStyle 加可选 onEnter/onExit(el)→附加时长 钩子（宿主 close 时长取 max）；效果随主题走不加设置面。能力分层已评估——打字机展开/颜色变换/额外元素零改动即可做（render 自由 DOM+CSS stagger），逐字收起等 JS 驱动退出效果需钩子；注意 update 重渲染要跳过 stagger、打字时长按字数自适应（~1.2s 封顶）。触发：用户拍板后做示范主题（打字机进出）。

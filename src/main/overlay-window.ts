@@ -30,6 +30,22 @@ export function createOverlayWindow(): BrowserWindow {
   })
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setBounds(primary.bounds)
+  // Occlusion freeze fix (2026-09-19): setIgnoreMouseEvents(false) — the
+  // interactive state while hovering/dragging the pet — strips BOTH
+  // WS_EX_TRANSPARENT and WS_EX_LAYERED (electron native_window_views.cc
+  // SetIgnoreMouseEvents), unless Electron's internal layered_ flag is set.
+  // An un-layered fullscreen topmost window counts as "fully opaque" in
+  // Chromium's native window occlusion check (hwnd_util.cc
+  // IsWindowVisibleAndFullyOpaque), so every Chromium/CEF app under it gets
+  // its rendering paused (animations freeze until foregrounded) — and the
+  // style restore after the drag is a silent SetWindowLong, so they only
+  // recover on a foreground switch. Calling setOpacity once pins layered_
+  // forever and applies LWA_ALPHA≈253; layered + alpha<255 is never an
+  // occluder, in any click-through state. 253/255 opacity is imperceptible.
+  // Verified: corner experiment 2026-09-19 (rig: occl-test) — victim window
+  // freezes 9.5s without layered, resumes 1.1s after setOpacity while the
+  // overlay stays fully interactive; transparency pixels unaffected.
+  win.setOpacity(254 / 255)
   // showInactive: focusable:false windows could still steal focus via
   // show() on Windows (electron#11049).
 
