@@ -89,6 +89,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-19（泡泡反馈批 3，v0.3.2）**：间距真凶 CDP 实测定位——宠物靠屏幕缘时侧列被视口钳制压到宠物身上；assignColumnSlots 升级 room-aware（按剩余空间贪心选边）。合成场景复测 petOverlaps=0。227 用例全绿。诊断手法：--remote-debugging-port + 合成事件 + Runtime.evaluate 量几何。
 - **2026-09-19（泡泡反馈批 4，v0.3.3）**：列布局重定为用户规格——列间按边框最近距离固定间隙（可调，默认 24px）、整组按宠物居中（packColumnBand）、超界整体内移。CDP 复测边框间隙精确 24px、全列在界内。228 用例全绿。
 - **2026-09-19（泡泡反馈批 5，v0.3.4）**：四类泡泡（思考/编辑/回复/完成）全维度独立配置——样式/入场/出场/停留时长 per-type（types 分组 + migrateTypeConfigs 旧键迁移外观不变），设置卡每类型一行。231 用例全绿。
+- **2026-09-19（泡泡反馈批 6，v0.3.5）**：修复 v0.3.4 引入的思考/编辑泡泡早夭回归（spawnWith 把 holdMs 错当弹出即关的定时器；生命周期应全由 hide 命令驱动）。CDP 验证：思考泡泡存活 3.6s+ 计时递增、编辑泡泡跨多次写入存活。教训：hold 有两种语义（完成后停留 vs 显示总时长），refactor 时混用了。
 - petween 基线：64 测试文件 / 1111 用例全绿（`50942a5` = V1.2 工作台 + P12 scrub/zoom + P13 多选/undo + P14 曲线编辑器；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：10 文件 / 166 用例。
 
 ## 7. 给编码智能体的原则

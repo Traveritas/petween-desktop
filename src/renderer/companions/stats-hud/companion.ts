@@ -171,7 +171,11 @@ export function createStatsHudCompanion(): DesktopCompanion {
         type: BubbleTypeKey,
         content: Parameters<BubbleHandle['update']>[0],
         placement: 'column' | 'left' | 'below' = 'column',
-        holdOverrideMs?: number,
+        /** Total-display auto-close; ONLY for command-less bubbles (turn/reply).
+         *  thinking/edit lifecycles are command-driven — their holdMs is the
+         *  after-completion delay the hide commands already carry (v0.3.4
+         *  regressed exactly this: spawn-time auto-close killed live bubbles). */
+        autoCloseMs?: number,
       ): BubbleHandle => {
         const cfg = options.types[type]
         const handle = host.spawn({
@@ -183,8 +187,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
           exitAnimationId: cfg.exitAnimationId,
           content,
         })
-        const hold = holdOverrideMs ?? cfg.holdMs ?? 0
-        if (hold > 0) later(() => handle.close(), hold)
+        if (autoCloseMs !== undefined && autoCloseMs > 0) later(() => handle.close(), autoCloseMs)
         return handle
       }
 
@@ -204,7 +207,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
                 return
               }
               if (preview.text === '') return
-              spawnWith(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, 'reply', { kind: 'reply', sessionId, text: preview.text }, 'left')
+              spawnWith(keyOf.reply(sessionId, preview.turnId ?? String(Date.now())), sessionId, 'reply', { kind: 'reply', sessionId, text: preview.text }, 'left', options.types.reply.holdMs)
             })
             .catch(() => {})
         }
