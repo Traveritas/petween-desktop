@@ -115,7 +115,7 @@
 用户反馈驱动：桌面端需要自己的设置（Connect / 通用 / 穿透可调）；点击穿透体感从未成功（→ 已定位修复 flapping bug `726209e`：keep-alive 重申冻结的 hover 结论导致整窗抖动）；设置单窗 vs 双窗（→ 调研后拍板**单窗 + iframe 内嵌**）。
 
 - [x] `desktop-settings.ts`：壳层设置存储（`userData/desktop-settings.json`，防抖持久化 + 变更订阅 + 严格归一化/夹取；**不碰 petween config**）
-- [x] `desktop-routes.ts`：`/api/petween-desktop/*`（settings GET/PUT、status、autolaunch GET/PUT、fix-interaction、dsh-test 探活）——设置页唯一传输通道（无 IPC），dev 走 proxy / prod 同源同一份代码；与 `/api/petween` 命名空间按段边界不冲突
+- [x] `desktop-routes.ts`：`/api/petween-desktop/*`（settings GET/PUT、status、autolaunch GET/PUT、open-animator（Phase 11 加入）、fix-interaction、dsh-test 探活）——设置页唯一传输通道（无 IPC），dev 走 proxy / prod 同源同一份代码；与 `/api/petween` 命名空间按段边界不冲突
 - [x] 设置页 `src/renderer/settings/`（第二个 vite 入口）：四分区左导航——**连接**（DSH 卡片：启停/端口/实时状态/测试按钮 + 未来连接器占位）、**宠物**（iframe 内嵌 `/petween-editor/`，保持挂载只切可见性防丢草稿；真实数据三栏布局验证过）、**交互**（模式三选 自动/始终穿透/始终可交互、命中外扩 0-24px、鼠标转发开关、自愈开关、救援热键开关、立即修复交互）、**通用**（开机自启镜像 + 版本/数据目录）
 - [x] pointer-through 设置化：`PointerThroughRuntimeOptions` 实时热更（updateOptions 强制重下发让 forward 开关即时生效）；强制模式逃生舱；**自愈**（5s 周期重申 + render-process-gone/powerMonitor resume/显示器增删改/拖动结束后 re-issue——对应 electron#33281/#15376→PR#52633/#49982/#41501 家族）；救援热键 Ctrl+Alt+P 切互斥「交互锁定」（注册失败优雅降级——本机实测被占用，热键可配置列入后续）；`showInactive()` 替代 `show()`（#11049）
 - [x] DSH 桥由设置驱动：启停即时生效（关=纯桌宠模式），端口下轮重连周期生效（`PETWEEN_DSH_PORT` 环境变量仍可覆盖）
@@ -182,7 +182,7 @@
 - **2026-09-16 鼠标卡死事故**：调试期间把模式切到 always-interactive 且被持久化 → 整屏窗吃掉系统所有鼠标点击（键盘不受影响，overlay focusable:false）；救援热键 Ctrl+Alt+P 被占用注册失败 → 无逃生口。**用户拍板：该模式整体移除**（与救援热键的瞬时锁定功能重叠且是唯一能卡死鼠标的路径）；救援热键改为链式注册（Ctrl+Alt+P→I→U）。任何残留的 always-interactive 设置值归一化为 auto。
 - **坐标空间教训**：以本机为例（2560×1600@100%）：overlay CSS 视口即物理分辨率，而自动化截图 raster 可能是半采样（如 1280×800）——换算 raster×2=CSS。给视觉模型喂先验坐标会得到顺从性误判（报错误位置"确认存在"），验收要以 config overlay 值/bodyRect 等数据源为准。
 - **排查顺带证实**：穿透三通道（转发 hit-test/光标轮询/滞回）在真实数据下判定全部正确。
-- **待办**：`dist:win` 前需在 electron-builder.yml files 加 `!node_modules/petween-physics`（防止 link 跟进 submodule）；dev 长会话中 main 热重启监视器偶发失灵（重启 dev 即恢复，低优先级记录）。
+- ~~**待办**：`dist:win` 前需在 electron-builder.yml files 加 `!node_modules/petween-physics`~~（✅ 同日 v0.1.0 评审已修）；dev 长会话中 main 热重启监视器偶发失灵（重启 dev 即恢复，低优先级记录）。
 
 
 ## v0.1.0 里程碑评审（2026-09-16，五路子智能体综合评审）
@@ -275,7 +275,7 @@
 
 error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 success）；应用未运行时每次工具调用在 zcode 日志留一条 curl failed 记录（不阻塞，exit≠2）；matcher 锚定语义与 Stop-错误回合行为待真机确认。
 
-## Phase 10：统计泡泡 HUD（思考用时 / 编辑行数）（2026-09-18 代码完成；真机验收待用户重装 hooks + 重启 zcode）
+## Phase 10：统计泡泡 HUD（思考用时 / 编辑行数）（2026-09-18 代码完成；✅ 真机验收通过）
 
 用户需求：文件写入弹「行数泡泡」（写入过程实时累加，完成后淡出）；思考弹「用时泡泡」（计时实时跳动，思考结束淡出）；样式与动画可扩展；先单会话，多会话排布与完成提醒后置。对话泡泡（带模型回复文本）**拍板为独立插件**——数据通道不同（hooks 拿不到回复文本，可靠来源只有 transcript 尾读）、生命周期不同；共享本次做的 BubbleHost 基础设施。
 
@@ -295,8 +295,8 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 ### 验收
 
 - [x] 单测 186 用例全绿（line-count/stats-ledger/stats-routes/端点载荷/连接器记账接线/hud-logic 全覆盖）+ typecheck
-- [ ] 真机：设置→连接→zcode「重装 hooks」→**重启 zcode 客户端**（hooks 启动时读）→ 跑一次编辑任务，观察泡泡（思考计时/行数累加/淡出/样式切换）
-- [ ] 旧格式 hooks（未重装）期间一切照旧（宠物联动不断，只是无泡泡）
+- [x] 真机：设置→连接→zcode「重装 hooks」→重启 zcode 客户端→ 跑编辑任务观察泡泡（✅ 经 v0.2.5~v0.3.15 十余轮真机反馈迭代确认，2026-09-20 用户确认泡泡线含皮肤批次全部正常）
+- [x] 旧格式 hooks（未重装）期间一切照旧（宠物联动不断，只是无泡泡——过渡期实测如此）
 
 ### 后置项（重开触发器）
 
@@ -310,7 +310,7 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 2. **入场/出场动画拆分为独立选项**（v0.2.5）：原打包预设（弹出→淡出、升起→沉落）改为两个注册表——入场 弹出/升起/淡入/坠落 × 出场 淡出/沉落/缩小，共 12 种组合，设置卡两个下拉；宿主 close 时先摘入场类再加出场类（不依赖 CSS 级联顺序）；旧 `animationId` 存量配置按 LEGACY_BUNDLED_EXITS 映射迁移，外观不变。
 3. **「随风」出场 + 「飘落」入场**（v0.2.6）：飘摇上升/飘落（横向摆动 + 微旋转），随风出场 950ms 慢淡出；为此给出场动画加 `durationMs` 字段（宿主按动画自带时长移除元素，原先统一 450ms 会掐断慢动画）。入场 5 × 出场 4 = 20 种组合。随风/飘落的摆动 v0.2.7 重制：上升/淡出走 transform 单一缓动曲线，横摆拆到独立 rotate 属性按半周期 ease-in-out 摆荡（钟摆式，消除了同属性多路标逐段缓动的顿挫）。
 
-## Phase 10 第二批：泡泡线四件套（2026-09-19 代码完成；真机验收待用户）
+## Phase 10 第二批：泡泡线四件套（2026-09-19 代码完成；✅ 2026-09-20 真机验收通过）
 
 用户拍板「继续做泡泡线」，四项一次落地（v0.3.0，224 用例全绿，+22）：
 
@@ -322,12 +322,12 @@ error 表情不可达（zcode 无 turn 级失败信号，Stop 一律映射 succe
 
 4. **里程碑宠物动画**：编辑片段内累计新增行每跨 N 行（设置可调，0=关）触发宠物本体动画（默认 builtin:click-pop，可配 id），每会话 10s 节流。
 
-### 验收（待用户）
+### 验收（✅ 2026-09-20 用户确认）
 
-- [ ] 多窗口并开：各会话独立列、焦点切换列重排、后台会话照常弹泡
-  
-- [ ] 回合结束：完成摘要泡泡 + 回复摘要泡泡（文本干净无 markdown 符号）
-- [ ] 里程碑动画触发（设置里把 N 调小如 50 便于观察）
+- [x] 多窗口并开：各会话独立列、焦点切换列重排、后台会话照常弹泡（经 v0.3.1~v0.3.12 反馈迭代实机验证）
+- [x] 回合结束：完成摘要泡泡 + 回复摘要泡泡（文本干净无 markdown 符号）
+- [x] 里程碑动画触发（设置里把 N 调小如 50 便于观察）
+- [x] 泡泡皮肤四批（玻璃/终端/浅色 + 漫画/便签/霓虹/墨金）全部正常（2026-09-20）
 
 ### 真机反馈追加（2026-09-19，v0.3.1）
 
@@ -382,7 +382,7 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 
 ### 真机反馈追加（2026-09-19，v0.3.13：拖宠物冻住全桌面动画的遮挡修复）
 
-用户报拖动宠物时其他应用动画全停、点到前台才恢复。**根因不是卡死，是 Chromium 原生窗口遮挡检测暂停渲染**：`setIgnoreMouseEvents(false)`（悬停/拖拽的 interactive 态）会把 `WS_EX_TRANSPARENT|WS_EX_LAYERED` 一起摘掉（electron `native_window_views.cc` SetIgnoreMouseEvents，内部 `layered_` 标志仅调过 setOpacity 才置位），全屏置顶窗于是满足 Chromium `IsWindowVisibleAndFullyOpaque`（`ui/gfx/win/hwnd_util.cc`）的"完全不透明遮挡者"条件，底下所有 Chromium/CEF 应用 PageVisibility=hidden、rAF/动画全停；而样式恢复走裸 `SetWindowLong`（静默、不产生 WinEvent），被冻结窗口又会被移出 LOCATIONCHANGE 钩子集合——光标划过救不活，只有 `EVENT_SYSTEM_FOREGROUND`（点击切前台）触发重算。修复 = overlay 创建后一次性 `setOpacity(254/255)`：置位 `layered_` 并设 LWA_ALPHA≈253，此后所有穿透模式保留 `WS_EX_LAYERED`，layered+alpha<255 在遮挡判定中永不算遮挡者；99.2% 不透明度不可感知。隔离实验（右下角 46s，rig 在 zcode exec/occl-test）：模拟窗 interactive 无 layered → 受害者窗 0.7s 内 hidden、rAF 冻 9.5s；setOpacity 后仍 interactive → 1.1s 恢复、透明像素无黑块、`layered_` 在后续模式切换中保留。顺带治好"悬停宠物期间其他应用短暂冻结"。235 壳层用例全绿（+overlay-window 2）。**真机验收待用户**：拖宠物时旁观应用（浏览器视频/动效）不再停。
+用户报拖动宠物时其他应用动画全停、点到前台才恢复。**根因不是卡死，是 Chromium 原生窗口遮挡检测暂停渲染**：`setIgnoreMouseEvents(false)`（悬停/拖拽的 interactive 态）会把 `WS_EX_TRANSPARENT|WS_EX_LAYERED` 一起摘掉（electron `native_window_views.cc` SetIgnoreMouseEvents，内部 `layered_` 标志仅调过 setOpacity 才置位），全屏置顶窗于是满足 Chromium `IsWindowVisibleAndFullyOpaque`（`ui/gfx/win/hwnd_util.cc`）的"完全不透明遮挡者"条件，底下所有 Chromium/CEF 应用 PageVisibility=hidden、rAF/动画全停；而样式恢复走裸 `SetWindowLong`（静默、不产生 WinEvent），被冻结窗口又会被移出 LOCATIONCHANGE 钩子集合——光标划过救不活，只有 `EVENT_SYSTEM_FOREGROUND`（点击切前台）触发重算。修复 = overlay 创建后一次性 `setOpacity(254/255)`：置位 `layered_` 并设 LWA_ALPHA≈253，此后所有穿透模式保留 `WS_EX_LAYERED`，layered+alpha<255 在遮挡判定中永不算遮挡者；99.2% 不透明度不可感知。隔离实验（右下角 46s，rig 在 zcode exec/occl-test）：模拟窗 interactive 无 layered → 受害者窗 0.7s 内 hidden、rAF 冻 9.5s；setOpacity 后仍 interactive → 1.1s 恢复、透明像素无黑块、`layered_` 在后续模式切换中保留。顺带治好"悬停宠物期间其他应用短暂冻结"。235 壳层用例全绿（+overlay-window 2）。**✅ 2026-09-20 真机验收通过**（用户确认拖宠物冻结问题已解决）。
 
 ### 真机反馈追加（2026-09-19，v0.3.14：EPIPE 弹窗刷屏防护）
 
@@ -400,7 +400,7 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 
 对话泡泡回复文本的展开/滚动交互、多显示器下列布局、milestone 动画按里程碑等级区分。
 
-## Phase 11：动画编辑器独立窗口（V1.2 工作台骨架，2026-09-19 代码完成；真机验收待用户）
+## Phase 11：动画编辑器独立窗口（V1.2 工作台骨架，2026-09-19 代码完成；真机验收暂缓——2026-09-20 用户拍板编辑器线先搁置）
 
 用户需求（2026-09-19 拍板）：动画编辑器独立成**按需启动的专用窗口**，编辑手感最终对标游戏引擎时间轴；上游可同步开发。总计划 = Phase 11 骨架 + Phase 12 scrub/zoom 手感批 + Phase 13 多选/undo/菜单批 + Phase 14 曲线编辑器批（每批上游 commit→push→bump→真机验收）。本 Phase 交付**骨架 + 独立窗口**。
 
@@ -429,7 +429,7 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 - Phase 13：多选/框选/批量拖动 + undo/redo（手势级快照栈）+ 右键菜单 + 快捷键全集
 - Phase 14：单段 cubic-bezier 曲线编辑器（KeyframeInspector 内嵌画布）+ 上游护栏措辞修订（§2.2/§6：排除多段曲线轨道全集，允许单段手柄）
 
-## Phase 12：手感一批——scrub 擦洗 + 采样预览 + zoom/pan + ms 时间轴 + 吸附升级（2026-09-19 代码完成；真机验收待用户）
+## Phase 12：手感一批——scrub 擦洗 + 采样预览 + zoom/pan + ms 时间轴 + 吸附升级（2026-09-19 代码完成；真机验收暂缓，随 Phase 11 编辑器线一并顺延）
 
 上游 `900f1d6`（62 文件/1088 用例全绿），桌面仅 bump 指针（194 用例全绿）——窗口重开即得，零桌面代码改动。
 
@@ -447,7 +447,7 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 - [x] 上游 1088 + 桌面 194 用例全绿；animator bundle 1.51MB
 - [ ] 真机：打开动画编辑器窗口 → 选中动画 → 拖标尺看预览定格与换图；Ctrl+滚轮缩放围绕光标；拖关键帧吸附到播放头/其他帧；Alt 拖动禁用吸附；Space 试播
 
-## Phase 13：手感二批——多选/框选/批量 + undo/redo + 右键菜单 + 快捷键（2026-09-19 代码完成；真机验收待用户）
+## Phase 13：手感二批——多选/框选/批量 + undo/redo + 右键菜单 + 快捷键（2026-09-19 代码完成；真机验收暂缓，随编辑器线一并顺延）
 
 上游 `382f148`（63 文件/1105 用例全绿），桌面仅 bump 指针（194 全绿）。
 
@@ -464,7 +464,7 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 - [x] 上游 1105 + 桌面 194 用例全绿
 - [ ] 真机：Shift/Ctrl 点选多帧 → 拖一个批量移动；框选后 Delete/Ctrl+D；Ctrl+Z 撤销整个拖拽为一步；右键各目标菜单动作；Esc 清选
 
-## Phase 14：手感三批——单段 bezier 曲线编辑器 + 护栏修订（2026-09-19 代码完成；真机验收待用户；v0.2.4）
+## Phase 14：手感三批——单段 bezier 曲线编辑器 + 护栏修订（2026-09-19 代码完成；真机验收暂缓，随编辑器线一并顺延；v0.2.4）
 
 上游 `be701c5`（64 文件/1110 用例全绿），桌面 bump 指针 + 版本 0.2.4。
 
@@ -486,7 +486,7 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 ## 待用户拍板项
 
 - [ ] publish 目标仓库与发版流程（appId 已在 electron-builder.yml 定为 `com.traveritas.petween`，仅发布仓库待定）
-- [ ] 数据目录策略确认：独立 `userData/petween-home/` + 一次性从 `~/.dsh/petween` 导入（02 号文档 §4 的推荐）
+- [x] ~~数据目录策略确认：独立 `userData/petween-home/` + 一次性从 `~/.dsh/petween` 导入~~（已按推荐落地并经发布验证，存档关闭）
 - [ ] 是否需要 macOS 支持（穿透/托盘 API 有平台差异，MVP 只验 Windows）
 
 ## 2026-09-19（下午）：真机反馈修复批——三栏 DCC 布局重构 + 光标/预览两修（上游 `50942a5` / 桌面 `9c678a7`）
@@ -523,4 +523,56 @@ v0.3.5 修复时给 turn 调用点补 autoCloseMs 的字符串替换因缩进不
 - 配置 `collision` 分组：`ignoreTransparentPixels`（默认 false）+ `alphaThreshold`（1..255 整数，默认 1=只忽略全透明）；设置卡「碰撞箱」分组两行；§12 共享配置摘要标签同步。宿主 PUT 校验/repairConfig 走既有单表。
 - 双入口（DSH client + desktop companion）同 provider 接线，符合三纪律（扫描器为注入缝）。
 
-physics 190 用例全绿（基线 166 + 新 24：扫描器几何/阈值/缓存、provider 映射/新鲜度/不拒绝契约、控制器收紧/回退/陈旧/预热/飞行中换姿势）；桌面 bump 指针后 typecheck + 233 用例全绿。**真机验收待用户**：设置卡开「碰撞箱→忽略图片透明像素」→ 扔宠物观察贴墙/贴地间隙按可见像素、换状态/flashPose 切图后弹跳仍顺滑。
+physics 190 用例全绿（基线 166 + 新 24：扫描器几何/阈值/缓存、provider 映射/新鲜度/不拒绝契约、控制器收紧/回退/陈旧/预热/飞行中换姿势）；桌面 bump 指针后 typecheck + 233 用例全绿。**✅ 2026-09-20 真机验收通过**（用户确认碰撞箱按可见像素工作）。原验收口径：设置卡开「碰撞箱→忽略图片透明像素」→ 扔宠物观察贴墙/贴地间隙按可见像素、换状态/flashPose 切图后弹跳仍顺滑。
+
+## v0.4.0 里程碑评审（2026-09-20，五路子智能体综合评审）
+
+评审范围：v0.1.0 标签以来 48 提交 / ~6700 行新增（Phase 9 zcode 连接器、Phase 10 泡泡线两批十六轮、Phase 11~14 动画编辑器 V1.2、physics 0.3.0、穿透三态机、EPIPE 守卫）+ 当前树整体。五路评审员（主进程 / 渲染层 / 测试 / 文档 / 安全）并行只读评审，**零 P0**、5 项 P1 + 一批 P2，当场修复后 264 用例全绿打标签。
+
+### 同日验收收口（先行）
+
+碰撞箱（physics alpha-tight）、遮挡修复（v0.3.13）、泡泡线（含皮肤四批）真机验收 ✅；动画编辑器线（Phase 11~14）拍板搁置、验收顺延。至此 v0.1.0 以来的「真机验收待用户」欠账清零（编辑器线除外）。
+
+### 已修复（随本里程碑提交）
+
+**P1（5 项全修）**：
+
+1. follow 模式焦点切换吞事件（zcode-connector）：切换目标后重放旧视觉即 return，触发切换的 user-prompt-submit 本身不发射——被门控后台 stop 压住的会话切回时宠物卡 success 脸到下一个事件。修复：重放仅在旧视觉 ≠ 当前事件时发生，然后落入公共发射路径（当前事件 + turn/start + scheduleIdle 全部生效）。
+2. 设置页 PUT 失败重试死代码（settings/main.tsx）：flush 回调不置空 `timer.current`，重试守卫 `=== null` 永假——瞬时失败静默丢设置。修复：flush 进入即置空。
+3. `animationId` 存量迁移丢失（v0.3.x 重构把 v0.2.5 的迁移丢了，`LEGACY_BUNDLED_EXITS` 成死代码）：≤0.2.3 用户升级静默回落默认动画。修复：migrateTypeConfigs 恢复 animationId 读取（enter=原值、exit=查表，新键优先）。
+4. **Host 头白名单（安全，收口 v0.1.0 backlog #4）**：v0.1.0 的「随机端口 + 无 CORS 头 + 跨源写栅栏」对 DNS rebinding 不充分——rebinding 工具先扫临时端口段再同端口寄生，Origin↔Host 相对比较尽数放行，GET 可读面含 /stats（sessionId+filePath）与 /dialogue（AI 回复预览）。修复：routes-host dispatcher 强制 Host 精确白名单（`127.0.0.1:<port>`/`localhost:<port>`，一处改动覆盖壳层+vendor 全部路由），dev 代理加 changeOrigin: true。
+5. 文档失真批：AGENTS.md 子模块指针（8190ae6/0a83a24，§2 与基线行矛盾已消）、决策 4（穿透三层→三态机+setOpacity）、决策 7（migrateLegacyHome→legacy-import.ts）、状态流水 2026-09-20 验收同步；docs/02+04 dev proxy 清单（缺 petween-desktop/physics、误含 petween-editor）；docs/06 §8.5 反引号内容丢失修复 + §6 模块清单补齐 connectors 八文件；README 状态段 v0.1.0→v0.4.0。
+
+**P2（当场修复 14 项）**：zcode-hooks 五连（归属判定改精确 cfg 路径匹配——前缀会误删用户在 `zcode-hooks.bak/` 等兄弟目录的条目；install/uninstall 串行化 promise 链 + 随机 tmp 后缀；非数组事件值拒绝改写不静默丢；写前 `.petween-bak` 备份；不强制翻 `hooks.enabled`——用户刻意全局禁用 hooks 时保留其设置）；ws 适配器 close 后保留 NOOP error 监听（teardown 窗口的 receiver 错误不再变 main 进程弹窗）+ maxPayload 1MiB；legacy-import 失败弹窗（原先 void 无 catch）；`companions.enabled` per-id 合并（局部 PUT 不再重置兄弟插件开关）；回复/完成泡泡 holdMs=0 语义修正（立即关闭而非永不关闭）；setMaxBubbles 排除 left/below 条目（潜伏）；bump 在入场动画窗口内抑制（bump 占用 animation 属性会取消并重放入场动画）；shared-host 后到 acquire 警告；dialogue 扫描行长 >4MB 跳过；hud-logic reconcileSession 补 thinking 对称兜底（事件环回绕丢 state 事件时按 summary 收泡）；三窗 will-navigate/setWindowOpenHandler 锁死 loopback（新 window-nav.ts）；disposeTimer 死代码清理。
+
+**补测试（+23，241→264）**：follow 切换双用例（含 gated-stop 回归）；animationId 迁移双用例；Host 栅栏 7 例（routes-host 单测 4 + local-server 真实服务器 3，含 rebinding 形态 Host==Origin）；zcode-hooks 5 例（前缀陷阱/非数组拒绝/enabled 保留/.bak/并发串行化）；destroyed 窗口回归（bd31993 形状，webContents getter 抛错模拟）；dialogue-routes 4 例（新文件——唯一内容级端点此前零测试）；hud 环回绕兜底 2 例；三窗导航锁断言。
+
+### 信任边界结论（安全评审，存档）
+
+loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览器页边界本次升级——随机端口对 rebinding 攻击者不构成屏障（临时端口段可扫），Host 白名单落地后读面（/stats、/dialogue）与写面（DELETE 宠物、PUT config、hooks 安装）对 rebound 页面均 403。其余核实为阴性：/petween-assets 与 /assets 双守卫无路径穿越、dialogue session 白名单+固定文件名模板走不出 rollout 目录、全仓零 HTML 注入 sink（textContent-only）、三窗 sandbox+contextIsolation 全开、preload 单通道、desktop-settings 白名单重建无原型污染。
+
+### Backlog（按价值排序，未修项）
+
+1. 测试 A1/A2：bubble-host DOM 生命周期与 stats-hud companion execute 映射的 jsdom 行为测试（v0.3.5/6/8 三个历史 bug 均发生在该层，现仍靠真机；stub offsetWidth/offsetHeight + fake timers 可测）。
+2. 测试 A5：e2e 升级为生产载荷（`--data-binary @-` stdin JSON → connector+ledger 全链）+ install/uninstall 真实文件 e2e。
+3. 主进程：dialogue 候选行整行驻留改边流边 parse 只留最后一条（长会话回合结束的数十 MB 瞬时抖动）；bridge 主循环 crash 后自动退避重启（现仅设置开关可复活）；flushSync 与在途异步写的陈旧覆盖窗口（毫秒级，低危）；与 zcode 客户端对 config.json 的跨进程双写（已用 .bak 缓解，根治需文件锁）。
+4. 渲染层：column 翻转下置与 below/left 栈的互避（宠物拖到屏幕顶部的退化重叠，已知取舍）；companion 重挂载从 cursor=0 重放事件环（开关无关插件时历史完成/回复泡泡复现）——init 先拉快照预热；settings-card 把 fetch 移出 setState updater。
+5. 安全：上游 petween 编辑器/动画器 HTML 壳 CSP（petween 回流）；prod 设置页 CSP 仍含 dev 17777 字面量（构建期条件化）。
+6. 观察项：electron PR#52631/#52633 合入 44.x 后复验穿透自愈面（沿袭 Phase 7 watchlist）。
+
+### 里程碑动作
+
+版本 0.3.15 → 0.4.0，打标签 `v0.4.0`。产物构建不在里程碑内（与 v0.1.0 同例，需要时 `pnpm dist:win`）。
+
+## Phase 15（下一主线）：Claude Code 连接器（开工准备，2026-09-20 用户拍板）
+
+泡泡线 + 统计账本已连接器无关，第二个连接器落地即点亮 CC 的状态联动 + 全套泡泡 HUD。架构完全复用 zcode 模板（docs/06 即为此设计），预估一个 Phase。
+
+- **传输**（2026-09-14 已调研）：CC hooks 侧 http handler 方案，6/6 状态显式覆盖（zcode 只有 8 事件近似拼，CC 更完整）；hooks 面与 zcode 同构 → `cc-hooks.ts`（安装/卸载/合并写复用 zcode-hooks 模式，含 v0.4.0 的串行化/精确归属/.bak/非数组保护四加固）。
+- **事件映射**：CC 事件名 → NormalizedAgentEvent（PreToolUse/PostToolUse/Notification/Stop/SessionStart…），spike 需实测 stdin 载荷形状（字段命名、turnId 有无、timestamp）——照 docs/06 §8.1 的 spike 方法。
+- **复用面**：StateRelay 缝 + 伪造 DSH 信封（零 petween 改动）、stats 账本（recordState/recordEdit 直接喂）、follow 模式焦点代理、watchdog 三时值、设置卡连接器卡片（连接分区槽位已留）。
+- **开工顺序**：① spike CC hooks 载荷与配置文件格式（~/.claude/settings.json？merge 语义与 zcode config 差异）→ ② cc-hooks 安装/卸载 + 测试 → ③ cc-connector 事件映射 + watchdog + 测试 → ④ 设置卡 + 真机联测（用户重装 CC hooks + 重启 CC）。
+
+## Phase 16：Codex 连接器（跟随 Phase 15）
+
+Phase 7 调研归类为「command hooks」家族（与 Codex/Gemini/Cursor 同型）：传输 = 进程启动时命令行钩子或文件监听，非本机 HTTP 监听。开工前需独立 spike 确认 Codex 的事件源形态（CLI hook / 会话文件 / notify 命令），规格按 docs/06 模板立 docs/07。与 CC 连接器的公共层（hooks 安装基建、watchdog、follow、账本）在 Phase 15 中顺手抽通用。

@@ -9,7 +9,7 @@ Petween 的独立 Windows 桌面版：把 [petween](https://github.com/Traverita
 
 ## 状态
 
-✅ v0.1.0（2026-09-16）：Phase 0~8 全部完成并通过真机验收——含桌面设置窗口（连接/宠物/交互/插件/通用）、点击穿透三通道与救援热键、DSH 状态桥（真机联测通过）、以及伴生插件体系与首个伴生「投掷物理」（拖住宠物甩出：重力 + 屏幕边缘弹跳 + 撞击特效）。发布项待拍板——见下。
+✅ v0.4.0（2026-09-20）：v0.1.0 之上新增——zcode 连接器（宠物联动本地 agent 会话）+ 统计泡泡 HUD（思考用时/编辑行数/回复摘要/完成提醒）+ 独立动画编辑器窗口（V1.2 工作台）+ 投掷物理与可见像素碰撞箱 + 穿透三态机与遮挡冻结修复。当前进度详见 [docs/05](docs/05-mvp-plan.md)。
 
 - 可行性结论与风险：[docs/01-eval.md](docs/01-eval.md)
 - 架构与装配指南：[docs/02-architecture.md](docs/02-architecture.md)
@@ -19,7 +19,7 @@ Petween 的独立 Windows 桌面版：把 [petween](https://github.com/Traverita
 
 ## 安装（Windows）
 
-1. 从 Releases 下载安装包并运行（NSIS 安装器，可选安装目录）。
+1. 本地构建：`pnpm dist:win` 产出 NSIS 安装器 + 便携版（2026-09-18 拍板暂不发布公开 Releases）。
 2. 首次运行会出现在系统托盘（洋红圆点图标）——右键托盘图标：打开设置、开机自启、从 DSH 导入数据、退出。
 3. 设置窗口里导入至少一张图片（推荐透明背景 PNG/WebP）作为「待机」姿势，宠物即出现在桌面上。
 
@@ -35,7 +35,7 @@ cd vendor/petween && pnpm install && pnpm run build && pnpm vitest run
 cd ../.. && pnpm install && pnpm dev
 ```
 
-- `pnpm test`：壳层单测（89 用例，不启动 Electron）
+- `pnpm test`：壳层单测（264 用例，不启动 Electron）
 - `pnpm typecheck`：tsc 全量（含 petween 源码）
 - `pnpm dist:win`：构建 submodule → electron-vite 三段构建 → electron-builder（NSIS + 便携版 `dist/win-unpacked/Petween.exe`）
 

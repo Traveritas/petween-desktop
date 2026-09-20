@@ -217,6 +217,13 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
         companions: {
           ...(settings.companions as unknown as Record<string, unknown>),
           ...((patch as { companions?: Record<string, unknown> })?.companions ?? {}),
+          // enabled merges per companion id, same as options below: a partial
+          // PUT toggling one companion must not reset its siblings (v0.4.0
+          // review — the plain spread replaced the whole map).
+          enabled: {
+            ...(settings.companions.enabled as unknown as Record<string, unknown>),
+            ...((patch as { companions?: { enabled?: Record<string, unknown> } })?.companions?.enabled ?? {}),
+          },
           // options merges per companion id: patching one companion's bag
           // must not drop another companion's (physics, stats HUD, …).
           options: {

@@ -1,6 +1,6 @@
 # 桌面版目标架构与装配指南
 
-> 基线：petween b0763e1（`vendor/petween` submodule）。本文回答「桌面壳怎么把 petween 装配起来」——所有 import 路径相对本仓库根，petween 源码在 `vendor/petween/src/` 下。
+> 基线：petween 8190ae6（`vendor/petween` submodule，= 50942a5 + 光标两修）。本文回答「桌面壳怎么把 petween 装配起来」——所有 import 路径相对本仓库根，petween 源码在 `vendor/petween/src/` 下。
 
 ## 1. 进程与窗口拓扑
 
@@ -25,7 +25,7 @@ Electron app（单实例锁）
 petween client 侧全部 HTTP 是**根相对路径**（`client/api.ts`、`state-protocol.ts`），SSE 用原生 EventSource。为了保证「零改动 petween」，两个模式都必须让页面与 API 同源：
 
 - **prod**：两个窗口都 `loadURL('http://127.0.0.1:<random>/...')`，local-server 同源伺服页面与 API。随机端口拼进 URL。
-- **dev**：renderer 走 electron-vite dev server（HMR），在 `electron.vite.config.ts` 里配 `server.proxy`，把 `/api/petween`、`/petween-assets`、`/petween-editor` 代理到 main 的 local-server（dev 模式固定端口如 17777）。浏览器视角仍同源，SSE 走 http-proxy 正常流通。
+- **dev**：renderer 走 electron-vite dev server（HMR），在 `electron.vite.config.ts` 里配 `server.proxy`，把 `/api/petween`、`/api/petween-desktop`、`/api/petween-physics`、`/petween-assets` 代理到 main 的 local-server（dev 模式固定端口 17777，代理开 changeOrigin 以满足 Host 白名单）。浏览器视角仍同源，SSE 走 http-proxy 正常流通；设置窗 dev 直连 local-server 不走 proxy。
 
 ## 2. Host 半装配清单（main 进程 deep import）
 
@@ -40,11 +40,12 @@ petween client 侧全部 HTTP 是**根相对路径**（`client/api.ts`、`state-
 | `buildConfigView` | `host/config-view.ts` | |
 | `ensurePresetAuthority(root)` | `host/migrate-v2.ts` | **建 store 前先跑**，与 `index.ts` 同顺序 |
 | `migrateLegacyHome(from, to)` | `host/migrate.ts` | 可选：从 `~/.dsh/petween` 一次性导入 |
-| `registerRoutes(host, deps)` | `host/routes.ts` | `RoutesDeps` 是 20 个函数的纯注入结构；**装配范本 = `index.ts:57-99`** |
+| `registerRoutes(host, deps)` | `host/routes.ts` | `RoutesDeps` 是 17 个成员的纯注入结构；**装配范本 = `index.ts:57-99`** |
 | `RoutesHost` 适配器 | 自写 ~30-50 行 | exact 优先 / prefix 最长匹配的 node:http 分发；**参考实现 = petween `tests/host/routes.test.ts:80-120`** |
 | `attachStateChannel(host, opts?)` | `host/state-channel.ts` | 桥实现 `StateChannelHost` 的 4 个 `on()`；SSE/心跳/快照端点白拿 |
 | `planMotionPackImport` 等 | `host/packs.ts` | `RoutesDeps.importPack` 用 |
 | `registerEditorPage(host, deps?)` | `host/editor-page.ts` | **必须注入 `loadBundle: () => readFile('<petween>/lib/editor.js')`**——默认按 `import.meta.url` 找包，deep import 态会 404 |
+| `registerAnimatorPage(host, deps)` | `host/animator-page.ts`（Phase 11） | 同 editor-page 的 deep-import 坑，必须注入 `loadBundle` 读 `lib/animator.js` |
 | `createPetweenHostService(store)` | `host/service.ts` | Phase 8 起启用：physics 伴生经它注册动画（local-server 暴露） |
 | `normalizeSessionEvent` / `normalizeAgentStatus` / `normalizeAgentError` | `integration/dsh/event-normalizer.ts` | 桥的输出端 |
 
@@ -58,7 +59,7 @@ petween client 侧全部 HTTP 是**根相对路径**（`client/api.ts`、`state-
 | `configHub` / `ConfigHub` | `client/config-hub.ts` | same-origin fetch + 3s 轮询 |
 | `DshStateSource` / `installCurrentSessionSource` | `integration/dsh/dsh-state-source.ts` | **MVP 用 aggregate 模式**（不装 CurrentSessionSource，自动落到全 session 聚合 SSE——这是 petween 已支持的 §14.5 fallback）；「跟随 DSH 当前会话」记为后续增强 |
 | `StateAdapter` / state-protocol | `integration/dsh/` | 纯 TS，EventSource + 2s 轮询降级 |
-| 设置编辑器整页 | `lib/editor.js`（构建产物） | 设置窗口 `loadURL('http://127.0.0.1:<port>/petween-editor/')`，零代码复用 |
+| 设置编辑器整页 | `lib/editor.js`（构建产物） | 设置窗（壳层自建页 /settings.html）的「宠物」分区 iframe 内嵌 `/petween-editor/`，零代码复用 |
 
 新写的 overlay 入口约 50 行：创建 React root → `configHub` → mount `<PetOverlay />`。**不要 import `vendor/petween/src/client/index.ts`**（那是 DSH slot 注册）。
 

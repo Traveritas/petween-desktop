@@ -15,7 +15,7 @@
  * registrations carrying the older `--data-urlencode` args keep working
  * (the endpoint parses both body shapes) but deliver no payload.
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { ZcodeHookKind } from './zcode-connector'
 
@@ -39,11 +39,6 @@ export const ZCODE_EVENT_PATH = '/api/petween-desktop/connector/zcode/event'
 /** Slashes forward so the same string works on disk, in JSON args and in cfg files. */
 export function normalizeCfgPath(path: string): string {
   return path.replace(/\\/g, '/')
-}
-
-/** Windows path comparisons are case-insensitive. */
-function sameCfgPath(a: string, b: string): boolean {
-  return normalizeCfgPath(a).toLowerCase() === normalizeCfgPath(b).toLowerCase()
 }
 
 export function cfgFileName(kind: ZcodeHookKind): string {
@@ -112,15 +107,18 @@ function isOurGroup(group: unknown, cfgDir: string): boolean {
   if (typeof group !== 'object' || group === null) return false
   const hooks = (group as MatcherGroup).hooks
   if (!Array.isArray(hooks)) return false
-  const dir = normalizeCfgPath(cfgDir)
+  // EXACT path match against the cfg files we render — a prefix test would
+  // also swallow a user's copy of our hooks parked under a sibling dir
+  // (e.g. zcode-hooks.bak/) and uninstall would delete their entry.
+  const ours = new Set(
+    CFG_BY_KIND.map(({ kind }) => normalizeCfgPath(`${cfgDir}/${cfgFileName(kind)}`).toLowerCase()),
+  )
   return hooks.some(
     (hook) =>
       typeof hook === 'object' &&
       hook !== null &&
       Array.isArray(hook.args) &&
-      hook.args.some(
-        (arg) => typeof arg === 'string' && sameCfgPath(normalizeCfgPath(arg).slice(0, dir.length), dir),
-      ),
+      hook.args.some((arg) => typeof arg === 'string' && ours.has(normalizeCfgPath(arg).toLowerCase())),
   )
 }
 
@@ -144,9 +142,31 @@ async function readConfigObject(path: string): Promise<Record<string, unknown> |
 
 async function writeConfigAtomic(path: string, config: Record<string, unknown>): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.petween-tmp`
+  // Random suffix: two concurrent writers must never share a tmp path (the
+  // in-module chain serializes our own calls; the suffix covers anything else).
+  const tmp = `${path}.petween-tmp-${process.pid}-${Math.random().toString(36).slice(2)}`
   await writeFile(tmp, JSON.stringify(config, null, 2), 'utf8')
+  try {
+    // One-generation backup — the config is user data; a botched merge must
+    // always be recoverable even if our error path misbehaved.
+    await copyFile(path, `${path}.petween-bak`)
+  } catch {
+    // absent on fresh installs — nothing to back up
+  }
   await rename(tmp, path)
+}
+
+/**
+ * Serializes the read-modify-write pair against itself — a double-clicked
+ * install or an install racing an uninstall must never interleave (the
+ * second writer's stale read would clobber the first writer's merge).
+ */
+let writeChain: Promise<unknown> = Promise.resolve()
+
+function serializedWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(operation, operation)
+  writeChain = run.catch(() => {})
+  return run
 }
 
 export interface ZcodeHooksPaths {
@@ -158,29 +178,40 @@ export interface ZcodeHooksPaths {
 
 /**
  * Installs (or reinstalls — idempotent) the hook registrations. Foreign
- * entries and unrelated top-level keys are preserved; `hooks.enabled` is set
- * true (configuration-file hooks are disabled by default in zcode).
+ * entries and unrelated top-level keys are preserved; a pre-existing
+ * malformed (non-array) event value is REFUSED rather than silently dropped.
+ * `hooks.enabled` is only turned on when there was nothing there before —
+ * a user who deliberately disabled hooks globally keeps their setting (our
+ * hooks then wait for them to re-enable, exactly like their own).
  */
-export async function installZcodeHooks(paths: ZcodeHooksPaths): Promise<void> {
-  const config = (await readConfigObject(paths.zcodeConfigPath)) ?? {}
-  const hooks = (typeof config.hooks === 'object' && config.hooks !== null ? config.hooks : {}) as Record<string, unknown>
-  const events = (typeof hooks.events === 'object' && hooks.events !== null && !Array.isArray(hooks.events) ? hooks.events : {}) as Record<string, unknown>
+export function installZcodeHooks(paths: ZcodeHooksPaths): Promise<void> {
+  return serializedWrite(async () => {
+    const config = (await readConfigObject(paths.zcodeConfigPath)) ?? {}
+    const hooks = (typeof config.hooks === 'object' && config.hooks !== null ? config.hooks : {}) as Record<string, unknown>
+    const events = (typeof hooks.events === 'object' && hooks.events !== null && !Array.isArray(hooks.events) ? hooks.events : {}) as Record<string, unknown>
 
-  const ours = buildZcodeHookEvents(paths.cfgDir)
-  const merged: Record<string, unknown> = {}
-  const seenEvents = new Set<string>(Object.keys(events))
-  for (const [name, groups] of Object.entries(ours)) {
-    const existing = Array.isArray(events[name]) ? (events[name] as unknown[]) : []
-    merged[name] = [...existing.filter((group) => !isOurGroup(group, paths.cfgDir)), ...groups]
-    seenEvents.add(name)
-  }
-  // Foreign events we do not manage survive untouched.
-  for (const name of seenEvents) {
-    if (merged[name] === undefined) merged[name] = events[name]
-  }
+    const ours = buildZcodeHookEvents(paths.cfgDir)
+    const merged: Record<string, unknown> = {}
+    const seenEvents = new Set<string>(Object.keys(events))
+    for (const [name, groups] of Object.entries(ours)) {
+      const existing = events[name]
+      if (existing !== undefined && !Array.isArray(existing)) {
+        throw new Error(`zcode config hooks.events.${name} is not an array — refusing to overwrite user data (${paths.zcodeConfigPath})`)
+      }
+      const kept = existing === undefined ? [] : (existing as unknown[])
+      merged[name] = [...kept.filter((group) => !isOurGroup(group, paths.cfgDir)), ...groups]
+      seenEvents.add(name)
+    }
+    // Foreign events we do not manage survive untouched.
+    for (const name of seenEvents) {
+      if (merged[name] === undefined) merged[name] = events[name]
+    }
 
-  config.hooks = { ...hooks, enabled: true, events: merged }
-  await writeConfigAtomic(paths.zcodeConfigPath, config)
+    const hadNoEvents = Object.keys(events).length === 0
+    const enabled = hooks.enabled === true || hadNoEvents ? true : (hooks.enabled ?? false)
+    config.hooks = { ...hooks, enabled, events: merged }
+    await writeConfigAtomic(paths.zcodeConfigPath, config)
+  })
 }
 
 /**
@@ -188,33 +219,35 @@ export async function installZcodeHooks(paths: ZcodeHooksPaths): Promise<void> {
  * back to false (equivalent to the pristine state); a missing file is already
  * clean. Returns whether anything was removed.
  */
-export async function uninstallZcodeHooks(paths: ZcodeHooksPaths): Promise<boolean> {
-  const config = await readConfigObject(paths.zcodeConfigPath)
-  if (config === null) return false
-  const hooks = (typeof config.hooks === 'object' && config.hooks !== null ? config.hooks : null) as Record<string, unknown> | null
-  if (hooks === null) return false
-  const events = (typeof hooks.events === 'object' && hooks.events !== null && !Array.isArray(hooks.events) ? hooks.events : {}) as Record<string, unknown>
+export function uninstallZcodeHooks(paths: ZcodeHooksPaths): Promise<boolean> {
+  return serializedWrite(async () => {
+    const config = await readConfigObject(paths.zcodeConfigPath)
+    if (config === null) return false
+    const hooks = (typeof config.hooks === 'object' && config.hooks !== null ? config.hooks : null) as Record<string, unknown> | null
+    if (hooks === null) return false
+    const events = (typeof hooks.events === 'object' && hooks.events !== null && !Array.isArray(hooks.events) ? hooks.events : {}) as Record<string, unknown>
 
-  let removed = false
-  const next: Record<string, unknown> = {}
-  for (const [name, groups] of Object.entries(events)) {
-    if (!Array.isArray(groups)) {
-      next[name] = groups
-      continue
+    let removed = false
+    const next: Record<string, unknown> = {}
+    for (const [name, groups] of Object.entries(events)) {
+      if (!Array.isArray(groups)) {
+        next[name] = groups
+        continue
+      }
+      const kept = groups.filter((group) => {
+        const ours = isOurGroup(group, paths.cfgDir)
+        if (ours) removed = true
+        return !ours
+      })
+      if (kept.length > 0) next[name] = kept
     }
-    const kept = groups.filter((group) => {
-      const ours = isOurGroup(group, paths.cfgDir)
-      if (ours) removed = true
-      return !ours
-    })
-    if (kept.length > 0) next[name] = kept
-  }
 
-  if (!removed) return false
-  const hasEvents = Object.keys(next).length > 0
-  config.hooks = { ...hooks, events: next, enabled: hasEvents ? (hooks.enabled ?? true) : false }
-  await writeConfigAtomic(paths.zcodeConfigPath, config)
-  return true
+    if (!removed) return false
+    const hasEvents = Object.keys(next).length > 0
+    config.hooks = { ...hooks, events: next, enabled: hasEvents ? (hooks.enabled ?? true) : false }
+    await writeConfigAtomic(paths.zcodeConfigPath, config)
+    return true
+  })
 }
 
 /** True when our entries are present in the zcode config (for the settings card). */

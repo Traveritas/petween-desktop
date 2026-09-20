@@ -12,7 +12,14 @@ let refcount = 0
 
 export function acquireSharedBubbleHost(options: BubbleHostOptions): BubbleHost {
   refcount += 1
-  if (host === null) host = createBubbleHost(options)
+  if (host === null) {
+    host = createBubbleHost(options)
+  } else {
+    // The first acquire defines the host's coordinate system; a second live
+    // companion's options are silently ignored — say so instead of letting a
+    // future plugin debug why its anchor never applied (v0.4.0 review).
+    console.warn('[petween-desktop] shared BubbleHost already acquired — later options ignored', options)
+  }
   return host
 }
 

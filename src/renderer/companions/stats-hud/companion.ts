@@ -18,7 +18,7 @@ import type { StatsSnapshot } from '../../../main/connectors/stats-ledger'
 import { acquireSharedBubbleHost, releaseSharedBubbleHost } from '../bubbles/shared-host'
 import type { BubbleHandle } from '../bubbles/bubble-host'
 import { formatDuration, listBubbleStyles } from '../bubbles/styles'
-import { listBubbleEnterAnimations, listBubbleExitAnimations } from '../bubbles/animations'
+import { listBubbleEnterAnimations, listBubbleExitAnimations, LEGACY_BUNDLED_EXITS } from '../bubbles/animations'
 import { createHudReducer, DEFAULT_HUD_OPTIONS, type HudCommand, type HudOptions } from './hud-logic'
 import { StatsHudCard } from './settings-card'
 
@@ -72,12 +72,16 @@ const isBubbleTypeKey = (value: string): value is BubbleTypeKey =>
  * keys map onto the new shape so an existing pick keeps its exact look:
  * styleId → thinking+edit; replyStyleId/turnStyleId → their types; the
  * global animation pair → every type; thinkingHoldMs/editHoldMs → holds.
+ * One generation further back, v0.2.2/0.2.3 stored a single bundled
+ * `animationId` — its preset migrates to enter=itself, exit=the exit that
+ * preset used to bundle (LEGACY_BUNDLED_EXITS).
  */
 export function migrateTypeConfigs(raw: unknown): Record<BubbleTypeKey, Required<Pick<BubbleTypeConfig, 'holdMs'>> & BubbleTypeConfig> {
   const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const legacyPreset = asId(bag.animationId)
   const legacyStyle = asId(bag.styleId)
-  const legacyEnter = asId(bag.enterAnimationId)
-  const legacyExit = asId(bag.exitAnimationId)
+  const legacyEnter = asId(bag.enterAnimationId) ?? legacyPreset
+  const legacyExit = asId(bag.exitAnimationId) ?? (legacyPreset !== undefined ? LEGACY_BUNDLED_EXITS[legacyPreset] : undefined)
   const legacy = {
     thinking: { styleId: legacyStyle, enterAnimationId: legacyEnter, exitAnimationId: legacyExit, holdMs: clampMin(bag.thinkingHoldMs, DEFAULT_HOLDS.thinking, 0) },
     edit: { styleId: legacyStyle, enterAnimationId: legacyEnter, exitAnimationId: legacyExit, holdMs: clampMin(bag.editHoldMs, DEFAULT_HOLDS.edit, 0) },
@@ -186,7 +190,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
           exitAnimationId: cfg.exitAnimationId,
           content,
         })
-        if (autoClose && (cfg.holdMs ?? 0) > 0) later(() => handle.close(), cfg.holdMs ?? 0)
+        if (autoClose) later(() => handle.close(), Math.max(0, cfg.holdMs ?? 0))
         return handle
       }
 

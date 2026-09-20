@@ -137,7 +137,7 @@ function filePathOf(toolInput: unknown): string | undefined {
 
 interface SessionState {
   idleTimer: ReturnType<typeof setTimeout> | null
-  disposeTimer: ReturnType<typeof setTimeout>
+  disposeTimer: ReturnType<typeof setTimeout> | null
   /** Last hook kind seen (emitted or gated) — the replay source in follow mode. */
   lastKind: ZcodeHookKind | null
 }
@@ -149,7 +149,19 @@ export function createZcodeConnector(deps: ZcodeConnectorDeps): ZcodeConnector {
   const clearTimers = (state: SessionState): void => {
     if (state.idleTimer !== null) clearTimeout(state.idleTimer)
     state.idleTimer = null
-    clearTimeout(state.disposeTimer)
+    if (state.disposeTimer !== null) clearTimeout(state.disposeTimer)
+    state.disposeTimer = null
+  }
+
+  /** (Re)schedule the inactivity dispose — every event pushes it back out. */
+  const scheduleDispose = (sessionId: string, state: SessionState): void => {
+    state.disposeTimer = setTimeout(() => {
+      sessions.delete(sessionId)
+      deps.relay.emitSessionDisposed(sessionId)
+      deps.stats?.disposeSession(sessionId)
+      if (status.followTarget === sessionId) status.followTarget = null
+      deps.log?.(`[petween-zcode] session ${sessionId} disposed (inactivity)`)
+    }, DISPOSE_MS)
   }
 
   /**
@@ -205,28 +217,13 @@ export function createZcodeConnector(deps: ZcodeConnectorDeps): ZcodeConnector {
 
       let state = sessions.get(sessionId)
       if (state === undefined) {
-        state = {
-          idleTimer: null,
-          disposeTimer: setTimeout(() => {
-            sessions.delete(sessionId)
-            deps.relay.emitSessionDisposed(sessionId)
-            deps.stats?.disposeSession(sessionId)
-            if (status.followTarget === sessionId) status.followTarget = null
-            deps.log?.(`[petween-zcode] session ${sessionId} disposed (inactivity)`)
-          }, DISPOSE_MS),
-          lastKind: null,
-        }
+        state = { idleTimer: null, disposeTimer: null, lastKind: null }
         sessions.set(sessionId, state)
         status.sessionsSeen += 1
       }
       clearTimers(state)
       // Reschedule the inactivity dispose from this event.
-      state.disposeTimer = setTimeout(() => {
-        sessions.delete(sessionId)
-        deps.relay.emitSessionDisposed(sessionId)
-        deps.stats?.disposeSession(sessionId)
-        if (status.followTarget === sessionId) status.followTarget = null
-      }, DISPOSE_MS)
+      scheduleDispose(sessionId, state)
 
       // Phase 10 stats bookkeeping — BEFORE the follow gate, so background
       // sessions keep the ledger current exactly like they keep watchdogs.
@@ -260,21 +257,21 @@ export function createZcodeConnector(deps: ZcodeConnectorDeps): ZcodeConnector {
           if (status.followTarget !== sessionId) {
             const previous = status.followTarget
             status.followTarget = sessionId
-            deps.stats?.setFocus(sessionId)
             if (previous !== null) {
               // Retire the old target: an idle entry replaces its aggregate
               // slot at rank 0, so it can no longer suppress the new target.
               deps.relay.emitAgentStatus(previous, 'idle')
               deps.log?.(`[petween-zcode] follow ${sessionId} (was ${previous})`)
             }
-            // Replay the new target's current visual (or this event when it
-            // is the first sighting) so the pet switches without waiting for
-            // the target's next event.
-            emitState(sessionId, state.lastKind ?? kind, ts)
-            state.lastKind = kind
-            return
+            // Replay the new target's last visual only when it differs from
+            // this event — the event itself is emitted below, so the switch
+            // both reflects history and applies the current event (a gated
+            // background stop no longer swallows the focus event's thinking).
+            if (state.lastKind !== null && state.lastKind !== kind) {
+              emitState(sessionId, state.lastKind, ts)
+            }
           }
-          // Same target — the focus event is also just an event; emit below.
+          // Same or new target — the focus event is also just an event; emit below.
         } else if (status.followTarget !== null && sessionId !== status.followTarget) {
           state.lastKind = kind // background session: bookkeeping only
           return

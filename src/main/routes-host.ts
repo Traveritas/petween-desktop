@@ -18,6 +18,15 @@ export interface RouteTable {
   handleRequest(req: IncomingMessage, res: ServerResponse): void
   /** Registered routes in registration order (test introspection). */
   list(): readonly WebRoute[]
+  /**
+   * Restrict dispatch to these exact Host header values (lowercased
+   * `host:port`). The DNS-rebinding fence (v0.4.0 review): a rebound page
+   * requests http://attacker.com:<port>/ which carries the attacker's Host,
+   * so Origin↔Host relative checks pass but this exact match fails.
+   * Unset = allow all (route-table unit tests; the local server always sets
+   * it right after listen, before the event loop can turn).
+   */
+  setAllowedHosts(hosts: ReadonlySet<string>): void
 }
 
 function parsePathname(url: string | undefined): string {
@@ -30,6 +39,7 @@ function parsePathname(url: string | undefined): string {
 
 export function createRouteTable(): RouteTable {
   const routes: WebRoute[] = []
+  let allowedHosts: ReadonlySet<string> | null = null
 
   const register = (route: WebRoute): (() => void) => {
     routes.push(route)
@@ -41,7 +51,18 @@ export function createRouteTable(): RouteTable {
 
   return {
     host: { webServer: { register } },
+    setAllowedHosts(hosts) {
+      allowedHosts = new Set([...hosts].map((host) => host.toLowerCase()))
+    },
     handleRequest(req, res) {
+      if (allowedHosts !== null && !allowedHosts.has((req.headers.host ?? '').toLowerCase())) {
+        // Never disclose the route table to a foreign-origin requester —
+        // 403 before any handler runs, GET included.
+        res
+          .writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          .end(JSON.stringify({ error: 'FORBIDDEN_HOST' }))
+        return
+      }
       const pathname = parsePathname(req.url)
       const route =
         routes.find((candidate) => candidate.kind === 'exact' && candidate.path === pathname) ??

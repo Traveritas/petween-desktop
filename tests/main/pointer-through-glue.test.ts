@@ -77,6 +77,38 @@ function fakeWindow(): BrowserWindow {
   } as unknown as BrowserWindow
 }
 
+/**
+ * Mimics Electron on destroy: reading `.webContents` on a destroyed window
+ * THROWS "Object has been destroyed" (a getter, not a stale property), while
+ * the pre-captured webContents reference stays a usable EventEmitter. This
+ * is the bd31993 quit-crash shape.
+ */
+function destroyableWindow(): { win: BrowserWindow; destroy(): void } {
+  let destroyed = false
+  const webContents = {
+    on: (name: string, listener: () => void) => {
+      const list = electronMocks.windowListeners.get(name) ?? []
+      list.push(listener)
+      electronMocks.windowListeners.set(name, list)
+    },
+    removeListener: (name: string) => {
+      electronMocks.windowListeners.delete(name)
+    },
+  }
+  const win = {
+    get webContents(): unknown {
+      if (destroyed) throw new Error('Object has been destroyed')
+      return webContents
+    },
+    setIgnoreMouseEvents: electronMocks.setIgnoreMouseEvents,
+    getContentBounds: () => ({ x: 0, y: 0, width: 2560, height: 1600 }),
+    isDestroyed: () => destroyed,
+  }
+  return { win: win as unknown as BrowserWindow, destroy: () => {
+    destroyed = true
+  } }
+}
+
 const SIGNAL = POINTER_SIGNAL_CHANNEL
 
 function emit(win: BrowserWindow, payload: unknown): void {
@@ -204,5 +236,25 @@ describe('pointer-through glue', () => {
     electronMocks.setIgnoreMouseEvents.mockClear()
     expect(electronMocks.ipcHandlers.has(SIGNAL)).toBe(false)
     expect(calls()).toHaveLength(0)
+  })
+
+  it('a destroyed window is inert everywhere — quit-path regression (bd31993)', () => {
+    vi.useFakeTimers()
+    try {
+      const { win, destroy } = destroyableWindow()
+      handle = attachPointerThrough(win, { mode: 'auto', hitPaddingPx: 6, forwardMouseMoves: true, selfHealing: true })
+      electronMocks.setIgnoreMouseEvents.mockClear()
+      destroy()
+      // Ticks and self-heal cycles must skip the dead window entirely…
+      vi.advanceTimersByTime(10_000)
+      expect(calls()).toHaveLength(0)
+      // …and the quit-time dispose (the original crash site: dispose read
+      // win.webContents on the destroyed window) must complete via the
+      // captured reference without throwing.
+      expect(() => handle?.dispose()).not.toThrow()
+      handle = null
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

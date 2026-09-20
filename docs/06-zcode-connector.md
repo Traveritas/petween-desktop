@@ -113,8 +113,15 @@ zcode hooks ──(进程内联执行)──► curl.exe ──POST──► loc
 | `src/main/connectors/zcode-connector.ts` | 事件 → relay 映射 + per-session watchdog（纯 Node） |
 | `src/main/connectors/zcode-hooks.ts` | cfg 渲染/落盘 + zcode 配置安装/卸载/查询（纯 Node，路径注入） |
 | `src/main/connectors/zcode-routes.ts` | 四个 HTTP 端点（table 注册，模式同 desktop-routes） |
+| `src/main/connectors/stats-ledger.ts` | 连接器无关统计账本（§8.3：思考区间/行数/seq 环） |
+| `src/main/connectors/line-count.ts` | hook 载荷 → 行数差分（LCS，内容不落账本） |
+| `src/main/connectors/stats-routes.ts` | `GET /api/petween-desktop/stats`（HUD 轮询） |
+| `src/main/connectors/dialogue-source.ts` | rollout model-io 流式前扫 + 截断（路径注入，§8.5） |
+| `src/main/connectors/dialogue-routes.ts` | `GET /api/petween-desktop/dialogue`（唯一内容级只读端点） |
 | `src/main/index.ts` | 生命周期接线：boot 写 cfg、启停随设置 |
 | `src/renderer/settings/main.tsx` | 连接分区 zcode 卡片 |
+
+> v0.4.0 起 routes-host dispatcher 对**所有**端点强制 Host 白名单（`127.0.0.1:<port>`/`localhost:<port>`，DNS-rebinding 栅栏）——连接器端点同样在栅栏之内，详见 docs/05 v0.4.0 节。
 
 ## 7. 观察项 / 已知风险（真机验证清单）
 
@@ -177,4 +184,4 @@ DSH 桥的 `tool/call` arguments 本就带载荷，后续可从桥侧喂同一�
 
 ### 8.5 对话数据通道（第二批）
 
-回复文本不经过 hooks（Stop stdin 无文本、临时 transcript 用后即删）：读 zcode 持久化的 （AI-SDK 形状，finishReason+text+turnId）。坑：单行内嵌完整请求上下文，长会话 >1MB/行（实测 10MB 文件）——固定尾窗必漏最后一行 stop；实现为 readline 流式前扫 +  子串预过滤，只有候选行才 JSON.parse。归约边界：markdown 剥离 + 160 字截断，零持久化， 按需读。全链路唯一内容级通道（用户拍板的隐私面例外，与 §8.3 的计数不变量并行不悖）。
+回复文本不经过 hooks（Stop stdin 无文本、临时 transcript 用后即删）：读 zcode 持久化的 `~/.zcode/cli/rollout/model-io-<sessionId>.jsonl`（AI-SDK 形状，finishReason+text+turnId）。坑：单行内嵌完整请求上下文，长会话 >1MB/行（实测 10MB 文件）——固定尾窗必漏最后一行 stop；实现为 readline 流式前扫 + 含 "stop" 子串预过滤，只有候选行才 JSON.parse（行长 >4MB 跳过，v0.4.0 加固）。归约边界：markdown 剥离 + 160 字截断，零持久化，`GET /api/petween-desktop/dialogue?session=` 按需读。全链路唯一内容级通道（用户拍板的隐私面例外，与 §8.3 的计数不变量并行不悖）。

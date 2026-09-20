@@ -16,6 +16,7 @@ const electronMocks = vi.hoisted(() => {
       setBounds: vi.fn(),
       setOpacity: vi.fn(),
       once: vi.fn(),
+      webContents: { on: vi.fn(), setWindowOpenHandler: vi.fn() },
     }
     created.push(win)
     return win
@@ -64,5 +65,26 @@ describe('createOverlayWindow', () => {
     expect(alpha).toBeGreaterThan(0.99)
     expect(alpha).toBeLessThan(1)
     expect(alpha).toBeCloseTo(254 / 255, 10)
+  })
+
+  it('locks navigation to loopback and denies window.open (v0.4.0 security review)', () => {
+    createOverlayWindow()
+    const win = electronMocks.created[0] as {
+      webContents: {
+        on: ReturnType<typeof vi.fn>
+        setWindowOpenHandler: ReturnType<typeof vi.fn>
+      }
+    }
+    expect(win.webContents.setWindowOpenHandler).toHaveBeenCalledTimes(1)
+    const registered = win.webContents.on.mock.calls.find(([name]) => name === 'will-navigate')
+    expect(registered).toBeDefined()
+    const guard = registered![1] as (event: { preventDefault(): void }, url: string) => void
+    const blocked = { preventDefault: vi.fn() }
+    guard(blocked, 'https://attacker.example/payload') // remote — denied
+    guard(blocked, 'file:///C:/Windows/win.ini') // file:// — denied
+    expect(blocked.preventDefault).toHaveBeenCalledTimes(2)
+    guard(blocked, 'http://127.0.0.1:5173/overlay/index.html') // dev server — allowed
+    guard(blocked, 'http://localhost:51731/settings.html') // prod same-origin — allowed
+    expect(blocked.preventDefault).toHaveBeenCalledTimes(2)
   })
 })

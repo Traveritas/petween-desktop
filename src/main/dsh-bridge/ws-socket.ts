@@ -18,7 +18,10 @@ export interface BridgeSocket {
 }
 
 export function connectDshSocket(url: string): BridgeSocket {
-  const socket = new WebSocket(url) // no origin option: loopback trust gate
+  // 1 MiB frame cap: the bridge only ever expects small JSON envelopes, and
+  // a rogue/compromised process on the configured port must not be able to
+  // push 100 MiB frames (the ws default) through the relay.
+  const socket = new WebSocket(url, { maxPayload: 1 << 20 }) // no origin option: loopback trust gate
   const text = (data: WebSocket.RawData): string => {
     if (typeof data === 'string') return data
     return Buffer.from(data as ArrayBuffer).toString('utf8')
@@ -45,6 +48,10 @@ export function connectDshSocket(url: string): BridgeSocket {
     },
     close() {
       socket.removeAllListeners()
+      // ws still emits 'error' from its internal receiver/sender paths while
+      // the close handshake drains; an emit with zero listeners throws into
+      // the main process (the "A JavaScript error occurred" dialog family).
+      socket.on('error', () => {})
       socket.close()
     },
   }

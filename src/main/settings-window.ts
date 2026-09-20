@@ -7,6 +7,7 @@
  * open() calls never stack duplicate close handlers.
  */
 import { BrowserWindow } from 'electron'
+import { lockNavigationToLoopback } from './window-nav'
 
 export interface SettingsWindowLoad {
   serverPort: number
@@ -41,6 +42,7 @@ export function openSettingsWindow(load: SettingsWindowLoad, options: SettingsWi
     },
   })
   settingsWindow = win
+  lockNavigationToLoopback(win)
   win.once('ready-to-show', () => win.show())
   if (load.devUrl !== undefined) {
     void win.loadURL(`${load.devUrl}/settings/index.html`).catch((error: unknown) => {

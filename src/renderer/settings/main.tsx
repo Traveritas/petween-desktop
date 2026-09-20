@@ -96,6 +96,7 @@ function useSettings(): {
     }
     if (timer.current !== null) clearTimeout(timer.current)
     timer.current = setTimeout(() => {
+      timer.current = null // release the slot so a failed flush's retry guard can fire
       const body = pending.current
       pending.current = {}
       sendPatch(body, 1)

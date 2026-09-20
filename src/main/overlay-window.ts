@@ -8,6 +8,7 @@
  */
 import { BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
+import { lockNavigationToLoopback } from './window-nav'
 
 export function createOverlayWindow(): BrowserWindow {
   const primary = screen.getPrimaryDisplay()
@@ -28,6 +29,7 @@ export function createOverlayWindow(): BrowserWindow {
       backgroundThrottling: false, // pet animations must not pause when unfocused
     },
   })
+  lockNavigationToLoopback(win)
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setBounds(primary.bounds)
   // Occlusion freeze fix (2026-09-19): setIgnoreMouseEvents(false) — the

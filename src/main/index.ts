@@ -199,7 +199,20 @@ async function bootstrap(): Promise<void> {
           tray.update(trayState())
           break
         case 'import-from-dsh':
-          void runLegacyImport(legacyRoot, dataRoot, () => tray.update(trayState()))
+          // The rejection path is user-facing: a failed copy (disk full,
+          // permissions) must tell the user, not die as an unhandled
+          // rejection (v0.4.0 review).
+          runLegacyImport(legacyRoot, dataRoot, () => tray.update(trayState())).catch((error) => {
+            console.error('[petween-desktop] legacy import failed', error)
+            void dialog
+              .showMessageBox({
+                type: 'error',
+                title: '从 DSH 导入数据',
+                message: '导入失败，数据未改动。',
+                detail: String(error instanceof Error ? error.message : error),
+              })
+              .catch(() => {})
+          })
           break
         case 'quit':
           app.quit()

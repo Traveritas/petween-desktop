@@ -6,6 +6,7 @@
  * static serving, plus persistence across a server restart.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
+import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -116,5 +117,51 @@ describe('local-server endpoints', () => {
     } finally {
       await rebooted.close()
     }
+  })
+})
+
+describe('Host fence (DNS-rebinding defence — a rebound page carries the attacker\'s Host, so Origin↔Host relative checks pass but this exact match fails)', () => {
+  // The endpoint suite above closes the shared server inside its restart
+  // test, so this block boots a dedicated instance.
+  let fenceServer: PetweenLocalServer
+
+  beforeAll(async () => {
+    fenceServer = await startPetweenLocalServer({ dataRoot, editorBundlePath, animatorBundlePath })
+  })
+
+  afterAll(async () => {
+    await fenceServer.close()
+  })
+
+  function rawGet(port: number, host: string, path = '/api/petween/config'): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, path, method: 'GET', headers: { host } }, (res) => {
+        let data = ''
+        res.on('data', (chunk: Buffer) => {
+          data += chunk.toString()
+        })
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  }
+
+  it('serves a same-Host request normally', async () => {
+    const { status } = await rawGet(fenceServer.port, `127.0.0.1:${fenceServer.port}`)
+    expect(status).toBe(200)
+  })
+
+  it('403s a foreign Host on a GET read route', async () => {
+    const { status, body } = await rawGet(fenceServer.port, 'attacker.example:443')
+    expect(status).toBe(403)
+    expect(body).toContain('FORBIDDEN_HOST')
+  })
+
+  it('403s the rebinding shape — Host equal to a foreign Origin, path probing the desktop API', async () => {
+    // Host === Origin is exactly what a rebound same-origin page produces;
+    // per-route Origin↔Host fences cannot catch this, the table fence must.
+    const { status } = await rawGet(fenceServer.port, 'attacker.example', '/api/petween-desktop/stats')
+    expect(status).toBe(403)
   })
 })

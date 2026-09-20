@@ -186,6 +186,23 @@ export function createHudReducer(getOptions?: (() => Partial<HudOptions>) | Part
 
   const reconcileSession = (commands: HudCommand[], sessionId: string, summary: StatsSnapshot['sessions'][string], now: number): void => {
     const track = trackOf(sessionId)
+    // Ring-wrap fallback, symmetric with the edit branch below: when the
+    // renderer is throttled long enough for the 256-event ring to lose the
+    // thinking→working transition, the event stream can no longer deliver
+    // the hide — the summary is the remaining truth (v0.4.0 review).
+    if (
+      track.thinkingShown &&
+      (summary.state !== 'thinking' || (summary.thinkingSince !== null && summary.thinkingSince !== track.thinkingIntervalStart))
+    ) {
+      commands.push({
+        type: 'thinking-hide',
+        sessionId,
+        totalMs: Math.max(0, now - (track.thinkingIntervalStart ?? now)),
+        holdMs: options().thinkingHoldMs,
+      })
+      track.thinkingShown = false
+      track.thinkingIntervalStart = null
+    }
     if (summary.state === 'thinking' && summary.thinkingSince !== null) {
       if (track.thinkingIntervalStart === null) track.thinkingIntervalStart = summary.thinkingSince
       if (!track.thinkingShown && now - summary.thinkingSince >= options().thinkingShowThresholdMs) {

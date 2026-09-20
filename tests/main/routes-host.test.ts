@@ -8,9 +8,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { describe, expect, it } from 'vitest'
 import { createRouteTable } from '../../src/main/routes-host'
 
-function makeReqRes(url: string): { req: IncomingMessage; res: ServerResponse; status: () => number | undefined; body: () => string } {
+function makeReqRes(url: string, host?: string): { req: IncomingMessage; res: ServerResponse; status: () => number | undefined; body: () => string } {
   const state = { status: undefined as number | undefined, body: '', ended: false }
-  const req = { method: 'GET', url } as IncomingMessage
+  const req = { method: 'GET', url, headers: host === undefined ? {} : { host } } as IncomingMessage
   const res = {
     writeHead(status: number) {
       state.status = status
@@ -123,5 +123,56 @@ describe('createRouteTable dispatch', () => {
     const { req, res } = makeReqRes('/api/petween/packs/export?ids=a,b')
     table.handleRequest(req, res)
     expect(hit).toBe(true)
+  })
+})
+
+describe('Host fence (setAllowedHosts — DNS-rebinding defence, v0.4.0 review)', () => {
+  const registerEcho = (table: ReturnType<typeof createRouteTable>): void => {
+    table.host.webServer.register({
+      kind: 'exact',
+      path: '/api/echo',
+      handler: (_req, res) => {
+        res.writeHead(200).end('hit')
+      },
+    })
+  }
+
+  it('403s a foreign Host before any handler runs, GET included', () => {
+    const table = createRouteTable()
+    registerEcho(table)
+    table.setAllowedHosts(new Set(['127.0.0.1:17777']))
+    const { req, res, status, body } = makeReqRes('/api/echo', 'attacker.example:17777')
+    table.handleRequest(req, res)
+    expect(status()).toBe(403)
+    expect(body()).toContain('FORBIDDEN_HOST')
+  })
+
+  it('allows exact matches, case-insensitively', () => {
+    const table = createRouteTable()
+    registerEcho(table)
+    table.setAllowedHosts(new Set(['LocalHost:17777', '127.0.0.1:17777']))
+    const lower = makeReqRes('/api/echo', 'localhost:17777')
+    table.handleRequest(lower.req, lower.res)
+    expect(lower.status()).toBe(200)
+    const upper = makeReqRes('/api/echo', '127.0.0.1:17777')
+    table.handleRequest(upper.req, upper.res)
+    expect(upper.status()).toBe(200)
+  })
+
+  it('missing Host header is rejected once the fence is armed', () => {
+    const table = createRouteTable()
+    registerEcho(table)
+    table.setAllowedHosts(new Set(['127.0.0.1:17777']))
+    const { req, res, status } = makeReqRes('/api/echo') // no headers at all
+    table.handleRequest(req, res)
+    expect(status()).toBe(403)
+  })
+
+  it('unset = allow all (route-table unit-test semantics preserved)', () => {
+    const table = createRouteTable()
+    registerEcho(table)
+    const { req, res, status } = makeReqRes('/api/echo', 'anything.example')
+    table.handleRequest(req, res)
+    expect(status()).toBe(200)
   })
 })

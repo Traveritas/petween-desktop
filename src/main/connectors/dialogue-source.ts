@@ -25,6 +25,8 @@ export interface DialoguePreview {
 export const DIALOGUE_MAX_CHARS = 160
 /** Safety cap on candidate lines kept while streaming (one per turn in practice). */
 const MAX_CANDIDATES = 64
+/** Per-line bound: real model lines top out a little over 1 MB; anything larger is damage. */
+const MAX_LINE_BYTES = 4 * 1024 * 1024
 
 /**
  * Pure: pick the last completed (finishReason 'stop', non-empty text, no tool
@@ -110,6 +112,10 @@ export function createDialogueSource(deps: DialogueSourceDeps): DialogueSource {
         const candidates: string[] = []
         const reader = createInterface({ input: handle.createReadStream({ encoding: 'utf8' }), crlfDelay: Infinity })
         for await (const line of reader) {
+          // Damaged-input bound: a corrupted/hostile rollout with no newlines
+          // would otherwise buffer unbounded (normal model lines are already
+          // >1 MB; the cap sits far above anything real and skips the line).
+          if (line.length > MAX_LINE_BYTES) continue
           if (!line.includes('"stop"')) continue
           candidates.push(line)
           if (candidates.length > MAX_CANDIDATES) candidates.shift()

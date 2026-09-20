@@ -58,7 +58,7 @@ ipcMain.on('set-ignore-mouse-events', (e, ignore, opts) =>
 - CSP 注意：`connect-src` **不会**自动放行 localhost 不同端口，要显式列；同源 `'self'` 即覆盖。
 - **绝不关 `webSecurity`**。
 - asar：Electron 给 fs 打了补丁，main 里的 http server 从 asar 内 serve 静态文件开箱即用。
-- dev 模式（见 02 号文档 §1）：electron-vite dev server + `server.proxy` 代理 `/api/petween`、`/petween-assets`、`/petween-editor` 到 main 的 local-server（dev 固定端口），保同源 + HMR。
+- dev 模式（见 02 号文档 §1）：electron-vite dev server + `server.proxy` 代理 `/api/petween`、`/api/petween-desktop`、`/api/petween-physics`、`/petween-assets` 到 main 的 local-server（dev 固定端口，changeOrigin: true 满足 Host 白名单），保同源 + HMR。
 
 ## 4. 生命周期与系统集成
 
@@ -70,7 +70,7 @@ ipcMain.on('set-ignore-mouse-events', (e, ignore, opts) =>
 
 ## 5. 构建与分发
 
-**推荐**：**electron-builder + NSIS + GitHub Releases + electron-updater**（2026 社区共识：Forge 是官方铺装路适合要默认值的新手；builder 定制与自动更新链路更成熟，electron-vite 生态大量配 builder）。
+**推荐**：**electron-builder + NSIS + GitHub Releases + electron-updater**（2026-09-18 用户拍板：当前本地发布、不接 updater/publish，本节留作将来发版参考。2026 社区共识：Forge 是官方铺装路适合要默认值的新手；builder 定制与自动更新链路更成熟，electron-vite 生态大量配 builder）。
 
 ```yaml
 appId: <tbd>
@@ -114,11 +114,11 @@ petween-desktop/
 │   │   ├── overlay-window.ts      # 透明置顶窗（本文件 §1）
 │   │   ├── settings-window.ts
 │   │   ├── pointer-through.ts     # 穿透切换 + 光标轮询兜底 + 滞回（本文件 §2）
-│   │   ├── tray.ts / login-item.ts / displays.ts / updater.ts
+│   │   ├── tray.ts / login-item.ts / settings-window.ts / animator-window.ts / window-nav.ts
 │   ├── preload/index.ts           # contextBridge 白名单 API
 │   └── renderer/
 │       ├── overlay/               # mount PetOverlay（02 号文档 §3）
-│       └── (设置页直接用 host 伺服的 /petween-editor/，无需自建 renderer)
+│       └── settings/（设置窗为壳层自建页 /settings.html，「宠物」分区 iframe 内嵌 /petween-editor/）
 └── tests/main/                    # vitest node 环境 + vi.mock('electron')
 ```
 

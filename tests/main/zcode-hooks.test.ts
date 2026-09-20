@@ -153,6 +153,50 @@ describe('install', () => {
       expect(await readFile(configPath, 'utf8')).toBe('{ not json')
     })
   })
+
+  it('refuses a malformed (non-array) event value instead of silently dropping it', async () => {
+    const initial = JSON.stringify({ hooks: { enabled: true, events: { SessionStart: 'oops' } } })
+    await withTempConfig(initial, async (configPath) => {
+      await expect(installZcodeHooks(paths(configPath))).rejects.toThrow(/SessionStart.*not an array/)
+      expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(JSON.parse(initial)) // untouched
+    })
+  })
+
+  it('does not flip hooks.enabled when the user deliberately disabled hooks and has their own', async () => {
+    const initial = JSON.stringify({
+      hooks: {
+        enabled: false,
+        events: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] },
+      },
+    })
+    await withTempConfig(initial, async (configPath) => {
+      await installZcodeHooks(paths(configPath))
+      const config = JSON.parse(await readFile(configPath, 'utf8'))
+      expect(config.hooks.enabled).toBe(false) // user's global switch is theirs, not ours
+      expect(config.hooks.events.Stop).toHaveLength(2) // our entry still merged in
+    })
+  })
+
+  it('leaves a .petween-bak backup of the previous config on every rewrite', async () => {
+    await withTempConfig(null, async (configPath) => {
+      await installZcodeHooks(paths(configPath))
+      const first = JSON.parse(await readFile(configPath, 'utf8'))
+      first.hooks.events.Stop = [...first.hooks.events.Stop, { hooks: [{ type: 'command', command: 'echo x' }] }]
+      await writeFile(configPath, JSON.stringify(first), 'utf8')
+
+      await installZcodeHooks(paths(configPath)) // reinstall → rewrite → backup
+      const bak = JSON.parse(await readFile(`${configPath}.petween-bak`, 'utf8'))
+      expect(bak.hooks.events.Stop).toHaveLength(2) // the pre-rewrite generation
+    })
+  })
+
+  it('serializes concurrent install/uninstall — the config never interleaves', async () => {
+    await withTempConfig(null, async (configPath) => {
+      await Promise.all([installZcodeHooks(paths(configPath)), uninstallZcodeHooks(paths(configPath))])
+      const config = JSON.parse(await readFile(configPath, 'utf8')) // still valid JSON
+      expect(await zcodeHooksInstalled(paths(configPath))).toBe(false) // chain order: install → uninstall
+    })
+  })
 })
 
 describe('uninstall', () => {
@@ -190,6 +234,28 @@ describe('uninstall', () => {
       await writeFile(configPath, JSON.stringify({ mcp: {} }), 'utf8')
       expect(await uninstallZcodeHooks(paths(configPath))).toBe(false)
       expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual({ mcp: {} })
+    })
+  })
+
+  it('leaves a user copy of our hooks parked under a sibling cfg dir alone (exact-path ownership)', async () => {
+    // Regression (v0.4.0 review): ownership used to be a cfg-dir PREFIX test,
+    // so zcode-hooks.bak/stop.cfg matched too and uninstall deleted the
+    // user's backup entry. Ownership is now the exact cfg file paths.
+    const sibling = `${CFG_DIR}.bak/stop.cfg`
+    const initial = JSON.stringify({
+      hooks: {
+        enabled: true,
+        events: {
+          Stop: [{ hooks: [{ type: 'process', command: 'curl.exe', args: ['--config', sibling, '--data-binary', '@-'] }] }],
+        },
+      },
+    })
+    await withTempConfig(initial, async (configPath) => {
+      await installZcodeHooks(paths(configPath))
+      await uninstallZcodeHooks(paths(configPath))
+      const config = JSON.parse(await readFile(configPath, 'utf8'))
+      expect(config.hooks.events.Stop).toHaveLength(1) // the sibling-dir entry survived both passes
+      expect(config.hooks.events.Stop[0].hooks[0].args[1]).toBe(sibling)
     })
   })
 })

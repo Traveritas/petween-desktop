@@ -187,18 +187,50 @@ describe('follow mode (latest user-interacted session only)', () => {
     setFollow(true)
     connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
     connector.handle({ kind: 'pre-tool-edit', sessionId: SESSION })
-    expect(emissions.filter((e) => e.method === 'event').length).toBeGreaterThanOrEqual(2)
+    // Exact count: turn/start + reasoning chunk + tool/call (nothing else).
+    expect(emissions.filter((e) => e.method === 'event').map((e) => e.event?.type)).toEqual([
+      'turn/start',
+      'assistant/chunk',
+      'tool/call',
+    ])
 
     connector.handle({ kind: 'pre-tool-command', sessionId: OTHER })
     expect(emissions.some((e) => e.sessionId === OTHER)).toBe(false) // gated
 
-    // Switching focus replays OTHER's tracked visual (tool-start command).
+    // Switching focus replays OTHER's tracked visual (tool-start command)…
     connector.handle({ kind: 'user-prompt-submit', sessionId: OTHER })
     const otherEvents = emissions.filter((e) => e.sessionId === OTHER)
     expect(otherEvents.map((e) => e.event?.type)).toContain('tool/call')
     expect(otherEvents.some((e) => e.method === 'status' && e.status === 'idle')).toBe(false)
+    // …and the focus event itself is applied too (v0.4.0 review P1: the
+    // switch used to swallow it, leaving a gated background 'stop' showing
+    // the success face until the target's next event minutes later).
+    expect(otherEvents.map((e) => e.event?.type)).toEqual([
+      'tool/call', // replayed last visual
+      'turn/start', // the focus event itself
+      'assistant/chunk',
+    ])
     // And retires SESSION with a rank-0 idle.
     expect(emissions.some((e) => e.sessionId === SESSION && e.method === 'status' && e.status === 'idle')).toBe(true)
+  })
+
+  it('a focus switch onto a backgrounded stop applies thinking immediately (no stale success face)', () => {
+    const { emissions, deps, setFollow } = setupFollow()
+    const connector = createZcodeConnector(deps)
+    setFollow(true)
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION }) // target: SESSION
+    connector.handle({ kind: 'user-prompt-submit', sessionId: OTHER }) // target: OTHER
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION }) // target back: SESSION — OTHER is background now
+    emissions.length = 0
+
+    connector.handle({ kind: 'stop', sessionId: OTHER }) // gated: bookkeeping only
+    expect(emissions.some((e) => e.sessionId === OTHER)).toBe(false)
+
+    connector.handle({ kind: 'user-prompt-submit', sessionId: OTHER }) // switch back
+    const types = emissions.filter((e) => e.sessionId === OTHER).map((e) => e.event?.type)
+    // Replayed stop visual, then the focus event itself — never a bare stale success.
+    expect(types).toEqual(['turn/end', 'turn/start', 'assistant/chunk'])
+    expect(emissions.some((e) => e.sessionId === OTHER && e.method === 'status' && e.status === 'idle')).toBe(false)
   })
 
   it('before the first focus signal, events pass through (aggregate until a target exists)', () => {

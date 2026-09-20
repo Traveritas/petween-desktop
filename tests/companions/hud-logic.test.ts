@@ -97,6 +97,44 @@ describe('thinking bubble', () => {
       { type: 'thinking-hide', sessionId: 's1', totalMs: 4500, holdMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs },
     ])
   })
+
+  it('hides a stuck thinking bubble when the ring wrapped past the transition (summary fallback)', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({ cursor: 10, focusedSessionId: 's1', sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) } }),
+      T0 + 4000,
+    )
+    // Ring wrap: the cursor jumped past the thinking→working event, so the
+    // event stream can never deliver the hide — the summary must (v0.4.0
+    // review; without this the timer bubbles forever on a throttled overlay).
+    const commands = reducer.apply(
+      snapshot({ cursor: 310, focusedSessionId: 's1', sessions: { s1: session({ state: 'working' }) } }),
+      T0 + 9000,
+    )
+    expect(commands).toEqual([
+      { type: 'thinking-hide', sessionId: 's1', totalMs: 9000, holdMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs },
+    ])
+  })
+
+  it('a wrapped ring that started a NEW thinking interval hides the stale one and re-seeds', () => {
+    const reducer = createHudReducer()
+    reducer.apply(
+      snapshot({ cursor: 10, focusedSessionId: 's1', sessions: { s1: session({ state: 'thinking', thinkingSince: T0 }) } }),
+      T0 + 4000,
+    )
+    const commands = reducer.apply(
+      snapshot({
+        cursor: 310,
+        focusedSessionId: 's1',
+        sessions: { s1: session({ state: 'thinking', thinkingSince: T0 + 8000 }) },
+      }),
+      T0 + 10_000,
+    )
+    expect(commands).toEqual([
+      { type: 'thinking-hide', sessionId: 's1', totalMs: 10_000, holdMs: DEFAULT_HUD_OPTIONS.thinkingHoldMs },
+      { type: 'thinking-show', sessionId: 's1', startedAt: T0 + 8000 },
+    ])
+  })
 })
 
 describe('edit bubble episodes', () => {

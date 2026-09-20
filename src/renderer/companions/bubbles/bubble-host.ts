@@ -90,6 +90,8 @@ interface BubbleEntry {
   /** Removed on close so enter and exit never share the animation property. */
   enterClass: string
   lastTouchedAt: number
+  /** The spawn instant — bump suppression window (see ENTER_ANIM_GUARD_MS). */
+  spawnedAt: number
   /** False until the first layout — the first position must not transition. */
   placed: boolean
   closing: boolean
@@ -204,6 +206,14 @@ const BASE_CSS = `
 `
 
 const BUMP_MS = 240
+/**
+ * Enter animations declare no duration (exit animations do), so bump
+ * suppression uses a fixed window covering the longest enter preset. The
+ * bump class also claims the `animation` property: mid-enter it would cancel
+ * the entrance, and removing it afterwards replays the entrance from 0% —
+ * "pop again then re-drift" on rapid consecutive updates (v0.4.0 review).
+ */
+const ENTER_ANIM_GUARD_MS = 1200
 const TOTAL_CAP_MULTIPLIER = 3
 /** Fixed stacks (left/below) carry transient bubbles — tiny independent caps. */
 const SIDE_STACK_CAP = 2
@@ -254,7 +264,11 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
       if (entry.closed || disposed) return
       entry.style.render(entry.el, content)
       entry.lastTouchedAt = Date.now()
-      if (updateOptions?.bump === true && !entry.closing) {
+      if (
+        updateOptions?.bump === true &&
+        !entry.closing &&
+        Date.now() - entry.spawnedAt >= ENTER_ANIM_GUARD_MS
+      ) {
         entry.el.classList.remove('pt-bubble--bump')
         void entry.el.offsetWidth // restart the animation
         entry.el.classList.add('pt-bubble--bump')
@@ -417,6 +431,7 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
         style,
         enterClass: enter.className,
         lastTouchedAt: Date.now(),
+        spawnedAt: Date.now(),
         placed: false,
         closing: false,
         closed: false,
@@ -459,7 +474,13 @@ export function createBubbleHost(options: BubbleHostOptions): BubbleHost {
     setMaxBubbles(max) {
       currentMax = max
       for (const key of new Set(entries.map((entry) => entry.sessionKey))) {
-        const column = entries.filter((candidate) => candidate.sessionKey === key && !candidate.closing)
+        // Column capacity only: left/below stacks have their own caps and
+        // must not be evicted as column members (v0.4.0 review; latent —
+        // nothing calls this yet).
+        const column = entries.filter(
+          (candidate) =>
+            candidate.sessionKey === key && !candidate.closing && candidate.placement === 'column',
+        )
         while (column.length > currentMax) {
           const victim = column.pop() as BubbleEntry
           handleFor(victim).close()

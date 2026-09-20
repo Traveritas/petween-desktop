@@ -138,10 +138,14 @@ export async function startPetweenLocalServer(options: LocalServerOptions): Prom
     server.once('error', reject) // EADDRINUSE/EACCES must reject, not crash
     server.listen(options.port ?? 0, '127.0.0.1', resolve)
   })
+  const port = (server.address() as AddressInfo).port
+  // Pin the Host fence to the actual port before the event loop can turn
+  // (any request carrying another origin's Host — DNS rebinding — 403s).
+  table.setAllowedHosts(new Set([`127.0.0.1:${port}`, `localhost:${port}`]))
 
   let closed = false
   return {
-    port: (server.address() as AddressInfo).port,
+    port,
     relay,
     stateChannel,
     webServer: table.host.webServer,

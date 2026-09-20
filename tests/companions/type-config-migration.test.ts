@@ -39,4 +39,24 @@ describe('migrateTypeConfigs', () => {
     expect(types.reply.holdMs).toBe(7000)
     expect(types.thinking.styleId).toBeUndefined()
   })
+
+  it('v0.2.2/0.2.3 bundled animationId migrates to enter=itself, exit=its bundled exit', () => {
+    // Regression (v0.4.0 review): the migration existed in v0.2.5
+    // (cf78964) but was dropped in the v0.3.x restructure — upgrades from
+    // ≤0.2.3 silently fell back to default animations.
+    const rise = migrateTypeConfigs({ animationId: 'rise' })
+    expect(rise.thinking).toMatchObject({ enterAnimationId: 'rise', exitAnimationId: 'sink' })
+    expect(rise.reply.exitAnimationId).toBe('sink')
+
+    const pop = migrateTypeConfigs({ animationId: 'pop' })
+    expect(pop.thinking).toMatchObject({ enterAnimationId: 'pop', exitAnimationId: 'fade' })
+
+    const drop = migrateTypeConfigs({ animationId: 'drop' })
+    expect(drop.thinking).toMatchObject({ enterAnimationId: 'drop', exitAnimationId: 'fade' })
+  })
+
+  it('explicit enter/exit keys win over the bundled animationId', () => {
+    const types = migrateTypeConfigs({ animationId: 'pop', enterAnimationId: 'rise', exitAnimationId: 'drift' })
+    expect(types.thinking).toMatchObject({ enterAnimationId: 'rise', exitAnimationId: 'drift' })
+  })
 })

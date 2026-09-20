@@ -12,6 +12,7 @@ interface FakeWindow {
   onceHandlers: Map<string, () => void>
   on(name: string, listener: (event: unknown) => void): void
   once(name: string, handler: () => void): void
+  webContents: { on: ReturnType<typeof vi.fn>; setWindowOpenHandler: ReturnType<typeof vi.fn> }
   loadURL: ReturnType<typeof vi.fn>
   show: ReturnType<typeof vi.fn>
   focus: ReturnType<typeof vi.fn>
@@ -35,6 +36,7 @@ const electronMocks = vi.hoisted(() => {
       once: (name, handler) => {
         onceHandlers.set(name, handler)
       },
+      webContents: { on: vi.fn(), setWindowOpenHandler: vi.fn() },
       loadURL: vi.fn(() => Promise.resolve()),
       show: vi.fn(),
       focus: vi.fn(),

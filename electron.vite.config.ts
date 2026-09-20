@@ -60,10 +60,13 @@ export default defineConfig({
     },
     server: {
       proxy: {
-        '/api/petween': { target: localServerTarget },
-        '/api/petween-desktop': { target: localServerTarget },
-        '/api/petween-physics': { target: localServerTarget },
-        '/petween-assets': { target: localServerTarget },
+        // changeOrigin: the local server enforces an exact Host whitelist
+        // (routes-host, DNS-rebinding fence) — without it the proxied
+        // requests would still carry the dev-server Host and 403.
+        '/api/petween': { target: localServerTarget, changeOrigin: true },
+        '/api/petween-desktop': { target: localServerTarget, changeOrigin: true },
+        '/api/petween-physics': { target: localServerTarget, changeOrigin: true },
+        '/petween-assets': { target: localServerTarget, changeOrigin: true },
       },
     },
     build: {

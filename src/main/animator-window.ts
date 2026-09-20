@@ -9,6 +9,7 @@
  * no preload; the page talks to /api/petween/* directly.
  */
 import { BrowserWindow } from 'electron'
+import { lockNavigationToLoopback } from './window-nav'
 
 export interface AnimatorWindowLoad {
   serverPort: number
@@ -43,6 +44,7 @@ export function openAnimatorWindow(load: AnimatorWindowLoad, options: AnimatorWi
     },
   })
   animatorWindow = win
+  lockNavigationToLoopback(win)
   win.once('ready-to-show', () => win.show())
   void win.loadURL(`http://127.0.0.1:${load.serverPort}/petween-animator/`).catch((error: unknown) => {
     console.error('[petween-desktop] animator page failed to load', error)
