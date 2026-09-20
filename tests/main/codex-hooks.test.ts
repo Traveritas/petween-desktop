@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCodexHookEvents,
   classifyCodexToolKind,
+  findNodePath,
   installCodexHooks,
   renderCodexCurlConfig,
   uninstallCodexHooks,
@@ -20,9 +21,10 @@ import {
 } from '../../src/main/connectors/codex-hooks'
 
 const CFG_DIR = 'C:/Users/t/AppData/Roaming/petween-desktop/codex-hooks'
+const NODE = 'D:/Nodejs/node.exe'
 
-function paths(hooksPath: string): { cfgDir: string; hooksPath: string } {
-  return { cfgDir: CFG_DIR, hooksPath }
+function paths(hooksPath: string): { cfgDir: string; hooksPath: string; nodePath: string } {
+  return { cfgDir: CFG_DIR, hooksPath, nodePath: NODE }
 }
 
 async function withTempConfig<T>(
@@ -49,21 +51,19 @@ describe('cfg rendering', () => {
     expect(cfg).toContain('noproxy = "*"')
   })
 
-  it('writeCodexHookConfigs writes one file per kind with the fresh port', async () => {
+  it('writeCodexHookConfigs writes one cfg per kind plus the node sink script', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'petween-cxcfg-'))
     try {
       await writeCodexHookConfigs(dir, 11111)
-      const events = buildCodexHookEvents(dir)
-      const hooks = Object.values(events).flat().flatMap((group) => group.hooks ?? [])
-      for (const hook of hooks) {
-        const match = /--config "([^"]+)"/.exec(hook.command ?? '')
-        expect(match).not.toBeNull()
-        const content = await readFile(match![1], 'utf8')
-        expect(content).toContain(':11111')
-      }
+      const sink = await readFile(join(dir, 'sink.js'), 'utf8')
+      expect(sink).toContain("process.argv[2]")
+      expect(sink).toContain('connector/codex/event?e=')
+      // The sink reads the port from its kind's cfg — spot-check one.
+      const cfg = await readFile(join(dir, 'session-start.cfg'), 'utf8')
+      expect(cfg).toContain(':11111')
+      // A later boot rewrites with the new port.
       await writeCodexHookConfigs(dir, 22222)
-      const first = await readFile(join(dir, 'session-start.cfg'), 'utf8')
-      expect(first).toContain(':22222')
+      expect(await readFile(join(dir, 'session-start.cfg'), 'utf8')).toContain(':22222')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -71,8 +71,8 @@ describe('cfg rendering', () => {
 })
 
 describe('buildCodexHookEvents', () => {
-  it('uses command STRINGS with the quoted cfg path, stdin forwarding and SECONDS timeout', () => {
-    const events = buildCodexHookEvents(CFG_DIR)
+  it('invokes the NODE sink with the kind argument (curl stdin dies under Codex\'s runner)', () => {
+    const events = buildCodexHookEvents(CFG_DIR, NODE)
     // ONE bare (match-all) PreToolUse group — no matchers at all: Codex
     // compiles them with the Rust regex crate (no look-around), so the
     // CC-style "everything else" pattern is rejected; classification moved
@@ -83,20 +83,40 @@ describe('buildCodexHookEvents', () => {
     const hook = (pre[0].hooks ?? [])[0] as Record<string, unknown>
     expect(hook.type).toBe('command')
     expect(hook.timeout).toBe(5) // seconds
-    expect(hook.command).toBe(`curl.exe --config "${CFG_DIR}/pre-tool-other.cfg" --data-binary @-`)
+    // The proven cmd-runner form: backslash exe + forward-slash script, NO
+    // quotes (a leading quoted token breaks cmd's /C quote-stripping).
+    expect(hook.command).toBe(`D:\\Nodejs\\node.exe ${CFG_DIR}/sink.js pre-tool-other`)
   })
 
-  it('covers the Codex event surface; Interrupt shares the session-start cfg; clamp-capped events set timeout 3', () => {
-    const events = buildCodexHookEvents(CFG_DIR)
+  it('covers the Codex event surface; Interrupt shares the session-start kind; clamp-capped events set timeout 3', () => {
+    const events = buildCodexHookEvents(CFG_DIR, NODE)
     expect(Object.keys(events).sort()).toEqual(
       ['Interrupt', 'PermissionRequest', 'PostToolUse', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
     )
     const start = (events.SessionStart[0].hooks ?? [])[0] as { command: string; timeout: number }
     const interrupt = (events.Interrupt[0].hooks ?? [])[0] as { command: string; timeout: number }
-    expect(interrupt.command).toBe(start.command) // same cfg, same idle visual
+    expect(interrupt.command).toBe(start.command.replace(/session-start$/, 'session-start')) // same cfg kind
+    expect(start.command.endsWith('sink.js session-start')).toBe(true)
     // Codex clamps SessionEnd/Interrupt to 3s — we set 3 so no startup warning.
     expect(interrupt.timeout).toBe(3)
     expect((events.SessionEnd[0].hooks ?? [])[0].timeout).toBe(3)
+  })
+})
+
+describe('findNodePath', () => {
+  it('resolves node.exe from a PATH-style string, forward-slashed; absent otherwise', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'petween-cxnode-'))
+    try {
+      await writeFile(join(dir, 'node.exe'), '', 'utf8')
+      const found = findNodePath(`C:\\definitely-not-here;${dir}`)
+      expect(found).not.toBeNull()
+      expect(found!.replace(/\\/g, '/')).toBe(join(dir, 'node.exe').replace(/\\/g, '/'))
+      expect(findNodePath(undefined)).toBeNull()
+      expect(findNodePath('')).toBeNull()
+      expect(findNodePath('C:\\definitely-not-here')).toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -201,6 +221,31 @@ describe('install', () => {
       const config = JSON.parse(await readFile(hooksPath, 'utf8'))
       expect(config.hooks.Stop).toHaveLength(1)
       expect(config.hooks.Stop[0].hooks[0].command).toContain(sibling)
+    })
+  })
+
+  it('reinstall filters STALE pre-v0.6.2 groups pointing at retired cfg names (no accumulation)', async () => {
+    // Real-machine report: the old three-matcher PreToolUse groups referenced
+    // pre-tool-edit/command.cfg — without the legacy names in the ownership
+    // set they survived every reinstall and accumulated.
+    const stale = (kind: string, matcher?: string) => ({
+      ...(matcher === undefined ? {} : { matcher }),
+      hooks: [{ type: 'command', command: `curl.exe --config "${CFG_DIR}/${kind}.cfg" --data-binary @-`, timeout: 5 }],
+    })
+    const initial = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          stale('pre-tool-edit', 'apply_patch|write_file|Edit|Write|MultiEdit|NotebookEdit'),
+          stale('pre-tool-command', 'shell|Bash'),
+          stale('pre-tool-other'),
+        ],
+      },
+    })
+    await withTempConfig(initial, async (hooksPath) => {
+      await installCodexHooks(paths(hooksPath))
+      const config = JSON.parse(await readFile(hooksPath, 'utf8'))
+      expect(config.hooks.PreToolUse).toHaveLength(1) // all three stale groups replaced by the single bare one
+      expect(config.hooks.PreToolUse[0].matcher).toBeUndefined()
     })
   })
 })

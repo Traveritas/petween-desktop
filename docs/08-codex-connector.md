@@ -28,13 +28,22 @@
 
 编辑行数：`apply_patch` 载荷是 patch 文本（line-count 的 countsFromPatch 分支）+ CC 形状的 Edit/Write 兜底——两种都已覆盖。
 
-## 3. 传输与端点
+## 3. 传输与端点（node sink，v0.6.4 重做——curl 在 Codex hook 执行器里读 stdin 必死）
 
-curl + cfg 同 zcode/CC（`userData/codex-hooks/<kind>.cfg` 每 boot 重写端口；`noproxy`/`connect-timeout 1`/`max-time 2`/`silent`）。端点 `POST /api/petween-desktop/connector/codex/event?e=<kind>`（1MB 帽/session 白名单/永远 204）+ status/install/uninstall。stdin 解析 `parseCodexHookBody`：`turn_id`→turnId、`transcript_path`（null 容忍）→transcriptPath、`tool_name`/`tool_input`。
+**取证链（2026-09-20 真机，借道 Codex 信任哈希自铸逐条实弹）**：Codex 的 Windows hook 执行器（COMSPEC→cmd.exe，raw_arg 外层引号，env 重放+清洗）下——stdin 单独可读（findstr ✓）、网络单独可用（curl 不读 stdin ✓）、**curl 读 stdin + 网络必挂**（`--data-binary @-`/`-d @-`，任意引号/包装形态，exit 1 空 stderr）；**node.exe 读 stdin + fetch 完全正常且送达**。另两个坑：命令串**首个 token 带引号**会被 cmd 的 /C 引号剥离劈坏（「命令语法不正确」）；正斜杠程序路径被 cmd 当开关。最终形态（deja-vu 同款、双 shell 尽量安全）：**`<node.exe 反斜杠> <cfgDir>/sink.js <kind>`——全无引号**。
+
+- **sink.js**（`userData/codex-hooks/`，随每 boot 的 cfg 重写一同落盘）：读 stdin JSON → 从本 kind 的 cfg 读端口 → fetch POST → 出口 0（1.8s 自杀兜底）。cfg 文件仍是端口发现载体（每 boot 重写随机端口；dev 17777）。
+- **node 定位**：安装时 `findNodePath(process.env.PATH)` 解析系统 node.exe 绝对路径写入命令；缺失则安装报错（设置卡显示「需要系统 Node.js」）。已知取舍：两路径含空格时无引号形态会断（cmd 引号剥离 vs bash 反斜杠吞噬的两难，本机无空格、文档记录）。
+- 端点 `POST /api/petween-desktop/connector/codex/event?e=<kind>`（1MB 帽/session 白名单/永远 204）+ status/install/uninstall。stdin 解析 `parseCodexHookBody`：`turn_id`→turnId、`transcript_path`（null 容忍）→transcriptPath、`tool_name`/`tool_input`。
+- **端到端验证（exec 模式）**：9 hooks Completed / 0 Failed，事件序列 idle→thinking→working→thinking→success→turn-summary 全送达，工具任务真实创建文件。
+
+### 3.1 信任哈希排障手册
+
+Codex 对每个 (event, matcher, group) 以 `sha256(规范 JSON)` 记信任（config.toml `[hooks.state.'<file>:<snake事件>:<组>:<handler>']`），identity = `{event_name, [matcher], hooks:[{type:'command', command, timeout, async:false}]}`（键排序、null 剔除、`sha256:` 前缀）。修改命令→Modified→静默跳过；交互模式弹信任确认，exec 模式直接不跑（排障时可在 config.toml 预铸哈希跳过确认——本次取证即此法）。
 
 ## 4. 安装/卸载（~/.codex/hooks.json）
 
-config-io 全套（精确归属=命令串含我们某个 cfg 路径、串行化、.petween-bak、非数组/非对象拒绝、损坏拒绝）；外来 hooks（deja-vu 等）与无关顶层键原样保留；卸载后全空删 hooks 键 + 清 bak。
+config-io 全套（精确归属=命令串含 sink.js/某 cfg/legacy cfg 路径、串行化、.petween-bak、非数组/非对象拒绝、损坏拒绝）；外来 hooks（deja-vu 等）与无关顶层键原样保留；卸载后全空删 hooks 键 + 清 bak。归属集含 legacy cfg 名单（pre-v0.6.2 三组 matcher 形态引用 pre-tool-edit/command.cfg——不进名单则重装永远清不掉，真机 4 组堆积实证）。
 
 ## 5. 对话泡泡（rollout 直取）
 

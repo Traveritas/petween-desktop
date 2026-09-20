@@ -30,6 +30,7 @@ import {
   uninstallCodexHooks,
   writeCodexHookConfigs,
   codexHooksInstalled,
+  findNodePath,
   type CodexHooksPaths,
 } from './connectors/codex-hooks'
 import { registerCodexConnectorRoutes } from './connectors/codex-routes'
@@ -356,10 +357,14 @@ async function bootstrap(): Promise<void> {
 
   // OpenAI Codex connector (Phase 16, docs/08): third profile on the shared
   // engine. hooks.json carries a trust hash per group — Codex asks the user
-  // to confirm our hooks once after install (settings card says so).
+  // to confirm our hooks once after install (settings card says so). The
+  // transport is the node sink script (curl's stdin read dies under Codex's
+  // Windows hook runner — docs/08 §3), so installs need a system node.exe.
+  const codexNodePath = findNodePath(process.env.PATH)
   const codexPaths: CodexHooksPaths = {
     cfgDir: join(app.getPath('userData'), 'codex-hooks'),
     hooksPath: join(homedir(), '.codex', 'hooks.json'),
+    nodePath: codexNodePath ?? '',
   }
   const codexConnector = createCodexConnector({
     relay: server.relay,
@@ -390,6 +395,9 @@ async function bootstrap(): Promise<void> {
       hooksInstalled: await codexHooksInstalled(codexPaths),
     }),
     installHooks: async () => {
+      if (codexNodePath === null) {
+        throw new Error('Codex 连接器需要系统 Node.js（未在 PATH 中找到 node.exe）')
+      }
       await syncCodexCfgFiles()
       await installCodexHooks(codexPaths)
     },

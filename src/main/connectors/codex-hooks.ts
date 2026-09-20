@@ -31,6 +31,57 @@ import { readConfigObject, removeBackup, serializedWrite, writeConfigAtomic } fr
 import type { CodexHookKind } from './codex-connector'
 
 /**
+ * The transport script every hook invokes: node reads the hook's stdin JSON
+ * and POSTs it to the sink endpoint. WHY NODE AND NOT CURL (real-machine
+ * forensic, 2026-09-20): under Codex's Windows hook runner, curl.exe fails
+ * with exit 1 the moment it reads stdin while doing network (`--data-binary
+ * @-`/`-d @-`, any quoting/wrapping) — stdin-only tools and network-only
+ * curl both succeed; node.exe doing stdin+fetch works flawlessly and
+ * DELIVERED. The port is read from the kind's cfg file (the cfgs stay the
+ * boot-time port-discovery carrier).
+ */
+const SINK_SCRIPT = `// Petween Codex hook sink (generated): POST the hook's stdin JSON to the app.
+const fs = require('fs')
+const path = require('path')
+const kind = process.argv[2] || 'session-start'
+let port = 17777
+try {
+  const m = /127\\.0\\.0\\.1:(\\d+)/.exec(fs.readFileSync(path.join(__dirname, kind + '.cfg'), 'utf8'))
+  if (m) port = Number(m[1])
+} catch {}
+let body = ''
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', (d) => { body += d })
+process.stdin.on('end', () => {
+  fetch('http://127.0.0.1:' + port + '/api/petween-desktop/connector/codex/event?e=' + kind, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body,
+  }).then(() => process.exit(0), () => process.exit(0))
+  setTimeout(() => process.exit(0), 1800)
+})
+`
+
+/** Locate the system node.exe (the sink transport needs it). null = absent. */
+export function findNodePath(pathEnv: string | undefined): string | null {
+  if (typeof pathEnv !== 'string' || pathEnv === '') return null
+  const fsSync = require('node:fs') as typeof import('node:fs')
+  for (const dir of pathEnv.split(';')) {
+    const trimmed = dir.trim()
+    if (trimmed === '') continue
+    for (const candidate of [join(trimmed, 'node.exe'), trimmed]) {
+      const asExe = candidate.toLowerCase().endsWith('.exe') ? candidate : `${candidate}.exe`
+      try {
+        if (fsSync.statSync(asExe).isFile()) return asExe.replace(/\\/g, '/')
+      } catch {
+        // keep searching
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Codex event registrations. NO PreToolUse matchers: Codex compiles matchers
  * with the Rust regex crate, which does NOT support look-around — the
  * negative-lookahead "everything else" pattern from the CC/zcode family is
@@ -93,7 +144,11 @@ export function renderCodexCurlConfig(port: number, kind: CodexHookKind): string
   ].join('\n')
 }
 
-/** (Re)writes every cfg file with the current port — run at every app boot. */
+/**
+ * (Re)writes every cfg file with the current port — run at every app boot.
+ * The cfgs are the PORT-DISCOVERY carrier only (the sink script reads the
+ * port from its kind's cfg); the hook commands run the sink, not curl.
+ */
 export async function writeCodexHookConfigs(cfgDir: string, port: number): Promise<void> {
   await mkdir(cfgDir, { recursive: true })
   const kinds = new Set(CODEX_EVENTS.map(({ kind }) => kind))
@@ -103,30 +158,35 @@ export async function writeCodexHookConfigs(cfgDir: string, port: number): Promi
       await writeFile(file, renderCodexCurlConfig(port, kind), 'utf8')
     }),
   )
+  await writeFile(join(cfgDir, 'sink.js'), SINK_SCRIPT, 'utf8')
 }
 
 type HookEntry = { type?: string; command?: string; timeout?: number; statusMessage?: string }
 type MatcherGroup = { matcher?: string; hooks?: HookEntry[] }
 
 /**
- * One hook invocation: Codex runs the command STRING through bash/cmd on
- * Windows, so the cfg path is double-quoted in place with FORWARD slashes
- * (backslash paths get eaten by bash — the deja-vu failure mode). stdin
- * carries the event JSON (--data-binary @-). Timeout is seconds.
+ * One hook invocation: `<node.exe backslashed> <cfgDir>/sink.js <kind>` —
+ * NO quotes: a leading quoted token makes cmd's /C quote-stripping rule
+ * mangle the line ("命令语法不正确", exit 1 — reproduced verbatim), while the
+ * unquoted backslash-exe + forward-slash-args form is proven to run under
+ * the COMSPEC runner AND deliver (the deja-vu command form; also bash-safe
+ * for the script path). Spaces in either path are a documented limitation
+ * (quote-breaks under cmd). Timeout is seconds.
  */
-function hookFor(cfgDir: string, kind: CodexHookKind, timeout = 5): HookEntry {
+function hookFor(cfgDir: string, kind: CodexHookKind, nodePath: string, timeout = 5): HookEntry {
+  const exe = nodePath.replace(/\//g, '\\')
   return {
     type: 'command',
-    command: `curl.exe --config "${normalizeCfgPath(cfgDir)}/${cfgFileName(kind)}" --data-binary @-`,
+    command: `${exe} ${normalizeCfgPath(cfgDir)}/sink.js ${kind}`,
     timeout,
   }
 }
 
 /** The top-level hooks object to merge into hooks.json. */
-export function buildCodexHookEvents(cfgDir: string): Record<string, MatcherGroup[]> {
+export function buildCodexHookEvents(cfgDir: string, nodePath: string): Record<string, MatcherGroup[]> {
   const merged: Record<string, MatcherGroup[]> = {}
   for (const { kind, event, timeout } of CODEX_EVENTS) {
-    const group: MatcherGroup = { hooks: [hookFor(cfgDir, kind, timeout)] }
+    const group: MatcherGroup = { hooks: [hookFor(cfgDir, kind, nodePath, timeout)] }
     merged[event] = [...(merged[event] ?? []), group]
   }
   return merged
@@ -134,42 +194,50 @@ export function buildCodexHookEvents(cfgDir: string): Record<string, MatcherGrou
 
 /**
  * EXACT cfg-path ownership: a hook is ours iff its command string contains
- * one of the cfg file paths we render (normalized, case-insensitive — a
- * foreign hook (deja-vu's, a user copy under a sibling dir) never matches.
+ * one of the cfg file paths we render (normalized, case-insensitive). The
+ * LEGACY names are cfg files earlier versions rendered (pre-v0.6.2 split
+ * PreToolUse matchers) — without them in the set, a reinstall would leave
+ * the stale groups in place forever (real-machine report: 4 accumulated
+ * groups). A foreign hook (deja-vu's, a user copy under a sibling dir)
+ * never matches.
  */
+const LEGACY_OWNED_CFG_NAMES = ['pre-tool-edit.cfg', 'pre-tool-command.cfg', 'pre-tool-other.cfg']
+
 function isOurGroup(group: unknown, cfgDir: string): boolean {
   if (typeof group !== 'object' || group === null) return false
   const hooks = (group as MatcherGroup).hooks
   if (!Array.isArray(hooks)) return false
-  const ours = new Set(
-    [...new Set(CODEX_EVENTS.map(({ kind }) => kind))].map((kind) =>
-      normalizeCfgPath(`${cfgDir}/${cfgFileName(kind)}`).toLowerCase(),
-    ),
-  )
+  const dir = normalizeCfgPath(cfgDir).toLowerCase()
+  const ours = new Set<string>([`${dir}/sink.js`])
+  for (const { kind } of CODEX_EVENTS) ours.add(normalizeCfgPath(`${cfgDir}/${cfgFileName(kind)}`).toLowerCase())
+  for (const name of LEGACY_OWNED_CFG_NAMES) ours.add(`${dir}/${name}`)
   return hooks.some((hook) => {
     if (typeof hook !== 'object' || hook === null) return false
     const command = (hook as HookEntry).command
     if (typeof command !== 'string') return false
     const normalized = normalizeCfgPath(command).toLowerCase()
     for (const path of ours) {
-      if (normalized.includes(`"${path}"`) || normalized.includes(path)) return true
+      if (normalized.includes(path)) return true
     }
     return false
   })
 }
 
 export interface CodexHooksPaths {
-  /** userData/codex-hooks — where the curl cfg files live. */
+  /** userData/codex-hooks — where the cfg files and sink.js live. */
   cfgDir: string
   /** ~/.codex/hooks.json — the Codex hook registrations. */
   hooksPath: string
+  /** Absolute path of the system node.exe (the sink transport). */
+  nodePath: string
 }
 
 /**
  * Installs (or reinstalls — idempotent) the hook registrations. Foreign
  * entries and unrelated top-level keys are preserved; malformed values are
  * REFUSED rather than silently replaced. NOTE: Codex hashes every hook
- * group — expect a one-time trust confirmation in Codex after installing.
+ * group — expect a one-time trust confirmation in Codex after installing
+ * (or pre-seed config.toml [hooks.state] — docs/08 §3.1).
  */
 export function installCodexHooks(paths: CodexHooksPaths): Promise<void> {
   return serializedWrite(paths.hooksPath, async () => {
@@ -180,7 +248,7 @@ export function installCodexHooks(paths: CodexHooksPaths): Promise<void> {
     }
     const hooks = (rawHooks ?? {}) as Record<string, unknown>
 
-    const ours = buildCodexHookEvents(paths.cfgDir)
+    const ours = buildCodexHookEvents(paths.cfgDir, paths.nodePath)
     const merged: Record<string, unknown> = {}
     const seenEvents = new Set<string>(Object.keys(hooks))
     for (const [event, groups] of Object.entries(ours)) {
