@@ -50,8 +50,6 @@ export interface HookConnectorProfile<K extends string> {
   statsTurnIdKinds: ReadonlySet<K>
   /** Edit-class kinds whose payload feeds recordEdit (counts only). */
   editKinds: ReadonlySet<K>
-  /** Fabricated tool name per edit-class kind — must classify via petween's toolKind. */
-  toolNameByKind: Partial<Record<K, string>>
   /** The state-changing emission for a kind (live and follow-mode replay). */
   emitVisual(relay: StateRelay, sessionId: string, kind: K, ts: number): void
   /** Kinds that also emit a turn/start marker for envelope fidelity. */

@@ -56,6 +56,15 @@ describe('normalizeDesktopSettings', () => {
     expect(normalizeDesktopSettings({ connectors: 'junk' }).connectors.zcode.enabled).toBe(true)
   })
 
+  it.each(['zcode', 'cc', 'codex'] as const)('%s connector mirrors the group defaults and junk falls back', (key) => {
+    expect(DEFAULT_DESKTOP_SETTINGS.connectors[key]).toEqual({ enabled: true, followLatestUser: false })
+    expect(normalizeDesktopSettings({ connectors: { [key]: { enabled: false, followLatestUser: true } } }).connectors[key]).toEqual({
+      enabled: false,
+      followLatestUser: true,
+    })
+    expect(normalizeDesktopSettings({ connectors: { [key]: 'junk' } }).connectors[key].enabled).toBe(true)
+  })
+
   it('cc connector (Phase 15) mirrors the zcode group and patches stay isolated', async () => {
     expect(DEFAULT_DESKTOP_SETTINGS.connectors.cc).toEqual({ enabled: true, followLatestUser: false })
     expect(normalizeDesktopSettings({ connectors: { cc: { enabled: false, followLatestUser: true } } }).connectors.cc).toEqual({

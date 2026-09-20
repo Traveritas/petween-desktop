@@ -564,7 +564,7 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 
 版本 0.3.15 → 0.4.0，打标签 `v0.4.0`。产物构建不在里程碑内（与 v0.1.0 同例，需要时 `pnpm dist:win`）。
 
-## Phase 15：Claude Code 连接器（2026-09-20 代码完成；真机验收待用户安装 hooks）
+## Phase 15：Claude Code 连接器（✅ 2026-09-20 完成并真机验收关闭）
 
 规格 = **docs/07**。泡泡线 + 统计账本已连接器无关，CC 连接器落地即点亮状态联动 + 全套泡泡 HUD。
 
@@ -581,7 +581,7 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 ### 实现（264→302 用例全绿 +38，详见 docs/07）
 
 1. **共享层抽取（zcode 行为零变化，37 个 zcode 连接器用例护航）**：`hook-connector.ts`（会簿/watchdog/follow/stats/信封引擎，按 profile 参数化）、`config-io.ts`（v0.4.0 加固的读改写基建，按路径串行化）、`route-helpers.ts`（路由脚手架）。zcode 三文件变薄壳；Phase 16 Codex 是第三个消费者。
-2. **cc-connector**：CC profile——`session-end`（SessionEnd 独有 kind：清定时器后立即 dispose，**排在排惰性定时器之前**——否则残留定时器在死会话上二次 dispose，测试钉住）；PermissionRequest + Notification 共用 permission-request（waiting 视觉）；编辑工具 matcher `Edit|Write|MultiEdit|NotebookEdit`（精确列表无需正则）。
+2. **cc-connector**：CC profile——`session-end`（SessionEnd 独有 kind：清定时器后立即 dispose，**排在排惰性定时器之前**——否则残留定时器在死会话上二次 dispose，测试钉住）；PermissionRequest 映射 permission-request（v0.6.3 摘除 Notification——其闲置提示曾把 success 脸污染成等待脸）；编辑工具 matcher `Edit|Write|MultiEdit|NotebookEdit`（精确列表无需正则）。
 3. **cc-hooks**：cfg 渲染/端口重写 + settings.json 合并安装/卸载，四加固全量适用（精确 cfg 路径归属/串行化/.petween-bak/非数组拒绝）；卸载后全空删整个 hooks 键；env 密钥等顶层键原样保留。
 4. **cc-routes**：`/api/petween-desktop/connector/cc/event|status|install|uninstall`；stdin JSON 解析（prompt_id→turnId）；1MB 上限/session 白名单/永远 204。
 5. **接线**：desktop-settings `connectors.cc`（enabled/followLatestUser 默认开/关，分组隔离有测试）；index.ts 镜像 zcode 块；设置卡 `HookConnectorCard` 泛型化双实例（CC 文案注明无需重启）。
@@ -601,7 +601,7 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 - ~~CC 对话泡泡（回复摘要）~~（✅ 同日解绑批完成，v0.5.1：dialogue 多源化 + cc-dialogue-source 父链回溯，详见 docs/07 §9；真机验收项并入下方清单）。
 - Notification 触发面观察（docs/07 §6.2）：不合适的等待视觉 → 摘掉 Notification 注册只留 PermissionRequest。
 
-## Phase 16：Codex 连接器（2026-09-20 代码完成；真机验收与 CC 一起）
+## Phase 16：Codex 连接器（✅ 2026-09-20 完成并真机验收关闭）
 
 规格 = **docs/08**。spike 推翻了 Phase 7 的「command hooks 家族」预判：**Codex 0.154 已实现 CC 兼容的原生 hooks**（codex-rs 引擎名就叫 `ClaudeHooksEngine`，配置在 `~/.codex/hooks.json`，本机 deja-vu hooks 共存实测）——于是 Codex 直接复用共享引擎成为第三个 profile，一行都没浪费在文件监听上。
 
@@ -626,3 +626,30 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 ### 后置项
 
 - 信任确认 UX 与 hooks.json 热加载的实测口径（docs/08 §6.1/6.2）；matcher 别名表逐个实测；工具名漂移观察。
+
+## v0.7.0 里程碑评审（2026-09-20，五路子智能体综合评审）
+
+评审范围：v0.4.0 标签以来 9 提交 / ~4100 行（Phase 15 CC 连接器、对话泡泡解绑、Phase 16 Codex 连接器、四批验收修复）。五路评审员（主进程/渲染层/测试/文档/安全）并行只读评审，**零 P0、1 项 P1 + 一批 P2**，当场修复后 364 用例全绿打标签。
+
+### 已修复（随本里程碑提交）
+
+**P1（1 项）**：config-io `readConfigObject` 把一切读失败当「全新安装」——CC 热加载 settings.json 的原子 rename 间隙/AV 短锁会让我们的 install 读到瞬时错误→判定 fresh→把用户整份配置（env 密钥等）塌缩成只剩 hooks 写回。修复 = 仅 ENOENT 视为缺失，其余 rethrow。
+
+**P2（当场修 18 项）**：安全 4（codex 归属判定改 token 精确匹配——子串匹配可让卸载误删「提到」我们路径的外部 hook；config-io rename 失败清理含密钥的 tmp 残留；dev 代理 origin 改条件重写——无条件重写会把同站 localhost 页面洗白过栅栏；findNodePath 优先已知安装根再回退 PATH + 剥引号）；主进程 7（apply_patch 载荷键实证为 `input`→line-count 补分支 + write 未识别形状归 null；codexNodePath 改安装时现查；sink 端口 fail-closed + node<18 fetch 守卫；zcode-hooks 畸形值拒绝与 cc/codex 对齐；zcode-routes 改用共享 route-helpers；引擎删死契约 toolNameByKind；cc-connector 头注释修正）；渲染 5（api() 失败透传服务端 message（安装拒绝/缺 Node 不再只显示 HTTP 500）；Codex 卡片补 node 前置与专属 transportNote；删 `as never` 断言；HUD 跳过已消失会话的环事件（disable 后不再弹最后一枚泡泡）；useSettings 响应合并 in-flight pending（防 300ms 视觉回弹））。
+
+**补测试（+12，352→364）**：codex-sink-e2e（执行级：真路由表送达/服务器消失 exit 0/cfg 缺失 fail-closed）；line-count 的 apply_patch input 形状 + write 未识别 null；config-io 的 ENOENT-only 语义与 tmp 卫生；desktop-settings 三连接器 it.each；两处测试修正（cc-dialogue sibling 在 Windows 的 no-op、恒等替换断言）。
+
+### 连接器是否插件化（2026-09-20 用户提问，拍板：暂不）
+
+现状：连接器是 main 进程内编译模块（共享层 hook-connector/config-io/route-helpers/dialogue-text 已构成「代码级 SDK」）；伴生插件宿主（Phase 8）是 renderer 侧体系（stats-hud/physics），无力承载连接器所需的路由注册/用户配置写入/FS 读取。**不改的理由**：① 运行时加载 main 代码 = 任意代码执行面，需要信任机制（Codex hooks 信任哈希的折腾是鲜活教训）；② 无第三方需求——沿用「独立编辑器分发」的触发式决策（出现 ≥1 个第三方连接器作者或自研连接器 ≥5 个时再抽 manifest 式包格式）；③ Phase 16 实证 in-tree 加一个连接器 ≈ 1 天，现速度无痛点。中间路线已就位：继续硬化接缝。
+
+### Backlog（按价值排序，未修项）
+
+1. follow 模式跨连接器互不感知（双 CLI 同时开跟随时宠物两脸摇摆）——跨连接器焦点仲裁器或文档明示。
+2. index.ts 启停翻转接线提纯函数并测（A2）；zcode-e2e 补 stdin JSON 现行形态（A4）。
+3. isProjectsPath/isSessionsPath 的敌对形状钉测试（A3：遍历/兄弟/UNC/小写盘符——实现已实证正确，缺钉）。
+4. 路由测试 mock 清理队列补全（B3）。
+
+### 里程碑动作
+
+版本 0.6.4 → 0.7.0，打标签 `v0.7.0`。

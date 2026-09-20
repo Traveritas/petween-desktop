@@ -36,7 +36,18 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'content-type': 'application/json' },
     ...init,
   })
-  if (!response.ok) throw new Error(`${path} -> HTTP ${response.status}`)
+  if (!response.ok) {
+    // Surface the server's reason (install refusals, missing Node, …) —
+    // a bare "HTTP 500" points the user at the wrong suspect.
+    let message = `${path} -> HTTP ${response.status}`
+    try {
+      const body = (await response.json()) as { error?: { message?: string } }
+      if (typeof body.error?.message === 'string' && body.error.message !== '') message = body.error.message
+    } catch {
+      // non-JSON body — keep the status line
+    }
+    throw new Error(message)
+  }
   return (await response.json()) as T
 }
 
@@ -118,7 +129,31 @@ function useSettings(): {
       body: JSON.stringify(body),
     }).then(
       (result) => {
-        if (seq === flushSeq.current) setSettings(result.settings)
+        if (seq !== flushSeq.current) return
+        // Merge any edits that landed while this flush was in flight — the
+        // raw server response doesn't know about them and would visually
+        // roll the toggles back for up to the 300ms debounce + RTT.
+        const queued = pending.current as Partial<{
+          clickThrough: Partial<DesktopSettings['clickThrough']>
+          dsh: Partial<DesktopSettings['dsh']>
+          companions: Partial<DesktopSettings['companions']>
+          connectors: {
+            zcode?: Partial<DesktopSettings['connectors']['zcode']>
+            cc?: Partial<DesktopSettings['connectors']['cc']>
+            codex?: Partial<DesktopSettings['connectors']['codex']>
+          }
+        }>
+        setSettings({
+          ...result.settings,
+          clickThrough: { ...result.settings.clickThrough, ...queued.clickThrough },
+          dsh: { ...result.settings.dsh, ...queued.dsh },
+          companions: { ...result.settings.companions, ...queued.companions },
+          connectors: {
+            zcode: { ...result.settings.connectors.zcode, ...queued.connectors?.zcode },
+            cc: { ...result.settings.connectors.cc, ...queued.connectors?.cc },
+            codex: { ...result.settings.connectors.codex, ...queued.connectors?.codex },
+          },
+        })
       },
       (error) => {
         console.error(`petween-desktop: settings save failed (attempt ${attempt})`, error)
@@ -217,6 +252,8 @@ function HookConnectorCard(props: {
   installedHint: string
   /** Suffix note under the coverage line while no events have arrived yet. */
   idleNote: string
+  /** Transport blurb under the coverage line (curl vs node sink). */
+  transportNote: string
 }): JSX.Element {
   const [status, setStatus] = useState<ZcodeConnectorStatus | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -288,13 +325,13 @@ function HookConnectorCard(props: {
         label={`启用 ${CONNECTOR_TITLES[slug]} 连接器`}
         hint="接收 hooks 事件并驱动宠物状态（关闭后为纯监听不联动）"
         checked={enabled}
-        onChange={(next) => props.patch({ connectors: { [slug]: { enabled: next } } as never })}
+        onChange={(next) => props.patch({ connectors: { [slug]: { enabled: next } } })}
       />
       <Toggle
         label="只跟随最近交互的会话"
         hint="多会话时宠物只联动你最近提交过提示（或新开/恢复）的会话；后台会话不打扰表情"
         checked={connector.followLatestUser}
-        onChange={(next) => props.patch({ connectors: { [slug]: { followLatestUser: next } } as never })}
+        onChange={(next) => props.patch({ connectors: { [slug]: { followLatestUser: next } } })}
       />
       <div className="row">
         <span className="rowText">
@@ -309,7 +346,7 @@ function HookConnectorCard(props: {
         <p className="sectionHint">
           已覆盖 {status.sessionsSeen} 个会话
           {status.lastEventAt === null ? props.idleNote : ''}
-          。事件经本机 curl POST 直达，工具调用开销约 50ms。
+          {props.transportNote}
         </p>
       )}
       {error !== null && <p className="probeResult">{error}</p>}
@@ -389,6 +426,7 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         installHint="向 ~/.zcode/cli/config.json 合并写入 hook 注册；安装后需重启 zcode 客户端生效"
         installedHint="从 zcode 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
         idleNote="（尚无事件——若刚安装，请重启 zcode 客户端）"
+        transportNote="事件经本机 curl POST 直达，工具调用开销约 50ms。"
       />
 
       <HookConnectorCard
@@ -398,15 +436,17 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         installHint="向 ~/.claude/settings.json 合并写入 hook 注册；CC 会热加载，无需重启即生效"
         installedHint="从 Claude Code 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
         idleNote="（尚无事件——CC 会热加载 settings.json，新会话即生效）"
+        transportNote="事件经本机 curl POST 直达，工具调用开销约 50ms。"
       />
 
       <HookConnectorCard
         settings={props.settings}
         patch={props.patch}
         slug="codex"
-        installHint="向 ~/.codex/hooks.json 合并写入 hook 注册；Codex 会请求一次信任确认（hooks 哈希校验）"
+        installHint="向 ~/.codex/hooks.json 合并写入 hook 注册（需要系统 Node.js）；Codex 会请求一次信任确认（hooks 哈希校验）"
         installedHint="从 Codex 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
         idleNote="（尚无事件——若刚安装，请在 Codex 里确认信任新增 hooks 后开启新会话）"
+        transportNote="事件经本机 node 进程直达（Codex 下 curl 不可用），开销约 100ms。"
       />
 
       <div className="connector placeholder">

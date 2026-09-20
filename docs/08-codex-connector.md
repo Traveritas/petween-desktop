@@ -5,7 +5,7 @@
 ## 1. Codex 侧事实（spike 实证/源码核实）
 
 1. **hooks 引擎是 CC 兼容的**（codex-rs 里引擎名就叫 `ClaudeHooksEngine`）：`~/.codex/hooks.json`，形状 `{ hooks: { <PascalCase事件>: [{ matcher?, hooks: [{ type:'command', command, timeout, statusMessage? }] }] } }`——本机 deja-vu 的 hooks 即此形态，实测共存。
-2. **command 是单个字符串**（无 args 数组），Windows 下经 `cmd.exe /C <line>`（COMSPEC）执行——**cfg 路径必须在命令串里加双引号**（用户名可含空格）。stdin 管道喂事件 JSON。
+2. **command 是单个字符串**（无 args 数组），Windows 下经 `cmd.exe /C <line>`（COMSPEC）执行——**引号取舍见 §3 v0.6.4 取证**（首个 token 带引号即被 cmd 引号剥离劈坏；最终形态全无引号，空格路径是已记录取舍）。stdin 管道喂事件 JSON。
 3. **timeout 单位秒**；我们写 5。
 4. **stdin 载荷**（schema.rs，snake_case）：公共 `session_id` / **`turn_id`** / `transcript_path`（可 null——`disable_response_storage` 下可能缺席）/ `cwd` / `hook_event_name` / `model` / `permission_mode`；工具事件加 `tool_name` / `tool_input`（+`tool_response`/`tool_use_id`）。**`turn_id` 是官方回合 id，直接作账本 turnId**（比 CC 的 prompt_id 推导还直接）。
 5. **信任机制**：Codex 对每个 (event, matcher, group) 算哈希并与受信存储比对——**安装后 Codex 会请求一次信任确认**（`bypass_hook_trust` 托管策略存在但不归我们碰）。设置卡文案已注明。
@@ -39,7 +39,7 @@
 
 ### 3.1 信任哈希排障手册
 
-Codex 对每个 (event, matcher, group) 以 `sha256(规范 JSON)` 记信任（config.toml `[hooks.state.'<file>:<snake事件>:<组>:<handler>']`），identity = `{event_name, [matcher], hooks:[{type:'command', command, timeout, async:false}]}`（键排序、null 剔除、`sha256:` 前缀）。修改命令→Modified→静默跳过；交互模式弹信任确认，exec 模式直接不跑（排障时可在 config.toml 预铸哈希跳过确认——本次取证即此法）。
+Codex 对每个 (event, matcher, group) 以 `sha256(规范 JSON)` 记信任（config.toml `[hooks.state.'<file>:<snake事件>:<组>:<handler>']`），identity = `{event_name, [matcher], hooks:[{type:'command', command, timeout, async:false}]}`（键排序、null 剔除、`sha256:` 前缀）。修改命令→Modified→静默跳过；交互模式弹信任确认，exec 模式直接不跑（排障时可在 config.toml 预铸哈希跳过确认——本次取证即此法）。算法以 0.154 实证；上游 identity 序列化仍在演进，升级 Codex 后预铸前需重新取证。
 
 ## 4. 安装/卸载（~/.codex/hooks.json）
 
@@ -56,6 +56,7 @@ rollout 文件 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`，行形
 3. ~~**matcher 锚定**~~（✅ 真机推翻：Rust regex 无 look-around，前瞻 matcher 直接被拒——已改为路由侧 `tool_name` 分类，见 §1.6/§2）。
 4. **工具名漂移**：路由分类的并集覆盖当前已知集——漏网的落 pre-tool-other（猫仍工作脸，只有图标分类差异），无功能风险；本机 deja-vu 的 hooks 用反斜杠路径经 bash 执行会 `command not found`（其自身问题，非我们引入——合并写保留其条目原样）。
 5. **disable_response_storage**：transcript_path 可能为 null——该会话无对话泡泡（状态/统计泡泡不受影响）。
+6. **exec 模式 Stop hook 竞态**：exec 模式下 Stop 事件 hook 对任何命令失败（deja-vu 二进制同败；Codex 回合收尾拆机竞态，Codex 侧问题，间歇性——同日 exec 亦有全序列成功送达案例）；交互模式（真实目标）不受影响。
 
 ## 7. 模块清单与测试
 
@@ -68,4 +69,4 @@ rollout 文件 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`，行形
 | `src/main/index.ts` | 接线镜像（含 quit dispose、dialogue sources 第三源） |
 | `src/renderer/settings/main.tsx` | 设置卡第三实例（信任确认文案） |
 
-测试：codex-hooks 10（命令串形状/三组 matcher/Interrupt 共 cfg/deja 共存/幂等/拒绝/串行/兄弟目录）、codex-connector 5（全词汇映射/session-end/watchdog 三时值/follow/stats turn_id）、codex-routes 7（stdin 解析含 null transcript/栅栏/405/500）、codex-dialogue-source 7（task_complete 提取/注册表校验/后缀扫描/字节帽）。
+测试：codex-hooks 13（cfg+sink 落盘/node sink 命令形态/findNodePath/事件面含 Interrupt 共 kind 与钳位 3/deja 共存/幂等+陈旧组清理/拒绝/串行/兄弟目录）、codex-connector 5（全词汇映射/session-end/watchdog 三时值/follow/stats turn_id）、codex-routes 8（stdin 解析含 null transcript/路由重归类/栅栏/405/500）、codex-dialogue-source 7（task_complete 提取/注册表校验/后缀扫描/字节帽）、codex-sink-e2e 3（sink.js 执行级：真路由表送达/服务器消失 exit 0/cfg 缺失 fail-closed）。

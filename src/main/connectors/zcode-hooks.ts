@@ -141,8 +141,17 @@ export interface ZcodeHooksPaths {
 export function installZcodeHooks(paths: ZcodeHooksPaths): Promise<void> {
   return serializedWrite(paths.zcodeConfigPath, async () => {
     const config = (await readConfigObject(paths.zcodeConfigPath)) ?? {}
-    const hooks = (typeof config.hooks === 'object' && config.hooks !== null ? config.hooks : {}) as Record<string, unknown>
-    const events = (typeof hooks.events === 'object' && hooks.events !== null && !Array.isArray(hooks.events) ? hooks.events : {}) as Record<string, unknown>
+    // Refusal discipline aligned with cc/codex (v0.7.0 review): a malformed
+    // hooks value would otherwise be silently rewritten (array-spread into a
+    // monster object / events dropped) instead of refused.
+    if (config.hooks !== undefined && (typeof config.hooks !== 'object' || config.hooks === null || Array.isArray(config.hooks))) {
+      throw new Error(`zcode config hooks is not an object — refusing to overwrite user data (${paths.zcodeConfigPath})`)
+    }
+    const hooks = (config.hooks ?? {}) as Record<string, unknown>
+    if (hooks.events !== undefined && (typeof hooks.events !== 'object' || hooks.events === null || Array.isArray(hooks.events))) {
+      throw new Error(`zcode config hooks.events is not an object — refusing to overwrite user data (${paths.zcodeConfigPath})`)
+    }
+    const events = (hooks.events ?? {}) as Record<string, unknown>
 
     const ours = buildZcodeHookEvents(paths.cfgDir)
     const merged: Record<string, unknown> = {}

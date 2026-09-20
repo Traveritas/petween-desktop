@@ -87,3 +87,20 @@ describe('editToolClass', () => {
     expect(editToolClass(undefined)).toBe('edit')
   })
 })
+
+describe('Codex apply_patch freeform input', () => {
+  it('counts +/- lines from the `input` key (custom_tool_call shape, spike-verified)', () => {
+    const counts = countEditLines('apply_patch', {
+      input: '*** Begin Patch\n*** Update File: a.ts\n@@\n context\n-old\n+new\n+extra\n*** End Patch',
+    })
+    expect(counts).toEqual({ added: 2, removed: 1 })
+  })
+
+  it('an `input` key that is not a Codex patch is ignored (falls through)', () => {
+    expect(countEditLines('shell', { input: 'echo hi' })).toBeNull()
+  })
+
+  it('an unrecognized write-shaped payload reports null, not 0/0', () => {
+    expect(countEditLines('write_file', { mystery: true })).toBeNull()
+  })
+})

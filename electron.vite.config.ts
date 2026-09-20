@@ -22,6 +22,28 @@ const rendererRoot = fileURLToPath(new URL('./src/renderer', import.meta.url))
  */
 const localServerTarget = `http://127.0.0.1:${DEV_LOCAL_PORT}`
 
+/**
+ * Proxy entry that speaks to the local server as its own origin — but only
+ * for requests that actually came from THIS dev server (origin matches the
+ * dev server's own origin). Foreign origins pass through untouched so the
+ * server-side fence rejects them (same-site localhost pages included).
+ */
+const proxyTo = (target: string) => ({
+  target,
+  changeOrigin: true,
+  configure: (proxy: { on: (event: 'proxyReq', listener: (proxyReq: { setHeader(k: string, v: string): void }, req: { headers: Record<string, string | string[] | undefined> }) => void) => void }): void => {
+    proxy.on('proxyReq', (proxyReq, req) => {
+      const origin = req.headers.origin
+      if (typeof origin === 'string') {
+        const host = req.headers.host
+        // The browser's same-origin request to the dev server carries
+        // origin === `http(s)://<this dev server's host>`.
+        if (host !== undefined && origin.endsWith(`//${host}`)) proxyReq.setHeader('origin', target)
+      }
+    })
+  },
+})
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: ['petween', 'petween-physics'] })],
@@ -60,16 +82,18 @@ export default defineConfig({
     },
     server: {
       proxy: {
-        // changeOrigin + origin rewrite: the local server enforces an exact
-        // Host whitelist (routes-host, DNS-rebinding fence) AND an Origin↔Host
-        // write fence (route-helpers). changeOrigin alone rewrites Host but
-        // leaves the browser's Origin (localhost:5173) — every proxied PUT/
-        // POST 403ed (real-machine report). The proxy speaks as the target's
-        // own origin so both fences see a coherent same-origin request.
-        '/api/petween': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
-        '/api/petween-desktop': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
-        '/api/petween-physics': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
-        '/petween-assets': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
+        // changeOrigin + CONDITIONAL origin rewrite: the local server enforces
+        // an exact Host whitelist (routes-host, DNS-rebinding fence) AND an
+        // Origin↔Host write fence (route-helpers). changeOrigin alone rewrites
+        // Host but leaves the browser's Origin (localhost:5173) — every proxied
+        // PUT/POST 403ed (real-machine report). The origin header is rewritten
+        // ONLY for requests that genuinely originate from this dev server —
+        // unconditional rewriting would also launder same-site localhost pages
+        // past the fence (v0.7.0 security review).
+        '/api/petween': proxyTo(localServerTarget),
+        '/api/petween-desktop': proxyTo(localServerTarget),
+        '/api/petween-physics': proxyTo(localServerTarget),
+        '/petween-assets': proxyTo(localServerTarget),
       },
     },
     build: {

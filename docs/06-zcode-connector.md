@@ -119,7 +119,9 @@ zcode hooks ──(进程内联执行)──► curl.exe ──POST──► loc
 | `src/main/connectors/dialogue-source.ts` | rollout model-io 流式前扫 + 截断（路径注入，§8.5） |
 | `src/main/connectors/dialogue-routes.ts` | `GET /api/petween-desktop/dialogue`（唯一内容级只读端点） |
 | `src/main/index.ts` | 生命周期接线：boot 写 cfg、启停随设置 |
-| `src/renderer/settings/main.tsx` | 连接分区 zcode 卡片 |
+| `src/renderer/settings/main.tsx` | 连接分区 zcode 卡片（HookConnectorCard） |
+
+> Phase 15 起引擎/配置/路由脚手架共享化（`hook-connector.ts` / `config-io.ts` / `route-helpers.ts`，zcode-connector 为薄壳 profile——见 docs/07 §1）；CC 与 Codex profile 见 docs/07/08。
 
 > v0.4.0 起 routes-host dispatcher 对**所有**端点强制 Host 白名单（`127.0.0.1:<port>`/`localhost:<port>`，DNS-rebinding 栅栏）——连接器端点同样在栅栏之内，详见 docs/05 v0.4.0 节。
 

@@ -117,7 +117,6 @@ const CODEX_PROFILE: HookConnectorProfile<CodexHookKind> = {
   turnStartKinds: new Set<CodexHookKind>(['user-prompt-submit']),
   statsTurnIdKinds: new Set<CodexHookKind>(['stop']),
   editKinds: new Set<CodexHookKind>(['pre-tool-edit']),
-  toolNameByKind: TOOL_NAME_BY_KIND,
   emitVisual: emitCodexVisual,
   turnStartEmitKinds: new Set<CodexHookKind>(['user-prompt-submit']),
   idleAfter: {

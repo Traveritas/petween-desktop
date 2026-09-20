@@ -360,11 +360,10 @@ async function bootstrap(): Promise<void> {
   // to confirm our hooks once after install (settings card says so). The
   // transport is the node sink script (curl's stdin read dies under Codex's
   // Windows hook runner — docs/08 §3), so installs need a system node.exe.
-  const codexNodePath = findNodePath(process.env.PATH)
   const codexPaths: CodexHooksPaths = {
     cfgDir: join(app.getPath('userData'), 'codex-hooks'),
     hooksPath: join(homedir(), '.codex', 'hooks.json'),
-    nodePath: codexNodePath ?? '',
+    nodePath: '',
   }
   const codexConnector = createCodexConnector({
     relay: server.relay,
@@ -395,9 +394,14 @@ async function bootstrap(): Promise<void> {
       hooksInstalled: await codexHooksInstalled(codexPaths),
     }),
     installHooks: async () => {
-      if (codexNodePath === null) {
-        throw new Error('Codex 连接器需要系统 Node.js（未在 PATH 中找到 node.exe）')
+      // Resolve node FRESH each install — a boot-time constant would freeze a
+      // stale path into hooks.json after the user installs/switches Node
+      // (v0.7.0 review: hooks would silently die with the old version dir).
+      const nodePath = findNodePath(process.env.PATH)
+      if (nodePath === null) {
+        throw new Error('Codex 连接器需要系统 Node.js（未找到 node.exe）')
       }
+      codexPaths.nodePath = nodePath
       await syncCodexCfgFiles()
       await installCodexHooks(codexPaths)
     },

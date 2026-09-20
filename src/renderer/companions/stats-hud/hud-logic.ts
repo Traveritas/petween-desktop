@@ -250,6 +250,12 @@ export function createHudReducer(getOptions?: (() => Partial<HudOptions>) | Part
       const inScope = (sessionId: string): boolean => multi || sessionId === focus
 
       for (const event of snapshot.events) {
+        // A session vanished from the snapshot (connector disabled → reset()
+        // drops the ledger row) but its last events still sit in the ring:
+        // replaying them would pop a final turn/reply bubble AFTER the user
+        // just switched the connector off. Any live session has a row from
+        // its first recorded event, so this filter is safe.
+        if (snapshot.sessions[event.sessionId] === undefined) continue
         if (inScope(event.sessionId)) applyEvent(commands, event, event.sessionId)
       }
 

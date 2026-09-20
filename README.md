@@ -9,7 +9,7 @@ Petween 的独立 Windows 桌面版：把 [petween](https://github.com/Traverita
 
 ## 状态
 
-✅ v0.4.0（2026-09-20）：v0.1.0 之上新增——zcode 连接器（宠物联动本地 agent 会话）+ 统计泡泡 HUD（思考用时/编辑行数/回复摘要/完成提醒）+ 独立动画编辑器窗口（V1.2 工作台）+ 投掷物理与可见像素碰撞箱 + 穿透三态机与遮挡冻结修复。当前进度详见 [docs/05](docs/05-mvp-plan.md)。
+✅ v0.7.0（2026-09-20）：三连接器（zcode / Claude Code / OpenAI Codex，共享 hook 引擎，全部真机验收通过）驱动宠物联动 + 统计泡泡 HUD（思考/编辑/回复/完成）+ 独立动画编辑器窗口（V1.2 工作台）+ 投掷物理与可见像素碰撞箱 + 穿透三态机与遮挡冻结修复。当前进度详见 [docs/05](docs/05-mvp-plan.md)。
 
 - 可行性结论与风险：[docs/01-eval.md](docs/01-eval.md)
 - 架构与装配指南：[docs/02-architecture.md](docs/02-architecture.md)
@@ -35,7 +35,7 @@ cd vendor/petween && pnpm install && pnpm run build && pnpm vitest run
 cd ../.. && pnpm install && pnpm dev
 ```
 
-- `pnpm test`：壳层单测（264 用例，不启动 Electron）
+- `pnpm test`：壳层单测（364 用例，不启动 Electron）
 - `pnpm typecheck`：tsc 全量（含 petween 源码）
 - `pnpm dist:win`：构建 submodule → electron-vite 三段构建 → electron-builder（NSIS + 便携版 `dist/win-unpacked/Petween.exe`）
 

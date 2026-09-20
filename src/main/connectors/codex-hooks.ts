@@ -44,11 +44,14 @@ const SINK_SCRIPT = `// Petween Codex hook sink (generated): POST the hook's std
 const fs = require('fs')
 const path = require('path')
 const kind = process.argv[2] || 'session-start'
-let port = 17777
+let port = null
 try {
   const m = /127\\.0\\.0\\.1:(\\d+)/.exec(fs.readFileSync(path.join(__dirname, kind + '.cfg'), 'utf8'))
   if (m) port = Number(m[1])
 } catch {}
+// Fail CLOSED: the 17777 fallback would POST payloads to whatever local
+// service happens to sit on the dev port when the cfg is unreadable.
+if (port === null || typeof fetch !== 'function') process.exit(0)
 let body = ''
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (d) => { body += d })
@@ -62,20 +65,38 @@ process.stdin.on('end', () => {
 })
 `
 
-/** Locate the system node.exe (the sink transport needs it). null = absent. */
+/**
+ * Locate the system node.exe (the sink transport needs it). null = absent.
+ * Known installation roots are preferred over PATH order — a PATH-first
+ * pick freezes whatever happens to be first (including an injected shim)
+ * into a long-lived trusted command (v0.7.0 security review).
+ */
 export function findNodePath(pathEnv: string | undefined): string | null {
-  if (typeof pathEnv !== 'string' || pathEnv === '') return null
   const fsSync = require('node:fs') as typeof import('node:fs')
-  for (const dir of pathEnv.split(';')) {
-    const trimmed = dir.trim()
+  const probe = (candidate: string): string | null => {
+    try {
+      if (fsSync.statSync(candidate).isFile()) return candidate.replace(/\\/g, '/')
+    } catch {
+      // keep searching
+    }
+    return null
+  }
+  const roots = [
+    process.env.ProgramFiles ? `${process.env.ProgramFiles}\\nodejs\\node.exe` : null,
+    process.env['ProgramFiles(x86)'] ? `${process.env['ProgramFiles(x86)']}\\nodejs\\node.exe` : null,
+  ].filter((entry): entry is string => entry !== null)
+  for (const root of roots) {
+    const found = probe(root)
+    if (found !== null) return found
+  }
+  if (typeof pathEnv !== 'string' || pathEnv === '') return null
+  for (const rawDir of pathEnv.split(';')) {
+    const trimmed = rawDir.trim().replace(/^"(.*)"$/, '$1')
     if (trimmed === '') continue
-    for (const candidate of [join(trimmed, 'node.exe'), trimmed]) {
-      const asExe = candidate.toLowerCase().endsWith('.exe') ? candidate : `${candidate}.exe`
-      try {
-        if (fsSync.statSync(asExe).isFile()) return asExe.replace(/\\/g, '/')
-      } catch {
-        // keep searching
-      }
+    for (const candidate of [join(trimmed, 'node.exe'), trimmed.toLowerCase().endsWith('.exe') ? trimmed : '']) {
+      if (candidate === '') continue
+      const found = probe(candidate)
+      if (found !== null) return found
     }
   }
   return null
@@ -215,11 +236,11 @@ function isOurGroup(group: unknown, cfgDir: string): boolean {
     if (typeof hook !== 'object' || hook === null) return false
     const command = (hook as HookEntry).command
     if (typeof command !== 'string') return false
-    const normalized = normalizeCfgPath(command).toLowerCase()
-    for (const path of ours) {
-      if (normalized.includes(path)) return true
-    }
-    return false
+    // TOKEN-exact ownership, not substring: an uninstall must never delete a
+    // foreign hook that merely MENTIONS our paths in a larger command string
+    // (v0.7.0 security review — command strings have no argv to compare).
+    const tokens = normalizeCfgPath(command).toLowerCase().split(/\s+/).map((token) => token.replace(/^"+|"+$/g, ''))
+    return tokens.some((token) => ours.has(token))
   })
 }
 

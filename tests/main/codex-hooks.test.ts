@@ -95,7 +95,8 @@ describe('buildCodexHookEvents', () => {
     )
     const start = (events.SessionStart[0].hooks ?? [])[0] as { command: string; timeout: number }
     const interrupt = (events.Interrupt[0].hooks ?? [])[0] as { command: string; timeout: number }
-    expect(interrupt.command).toBe(start.command.replace(/session-start$/, 'session-start')) // same cfg kind
+    // Interrupt maps onto the session-start kind: identical command (same sink + cfg kind).
+    expect(interrupt.command).toBe(start.command)
     expect(start.command.endsWith('sink.js session-start')).toBe(true)
     // Codex clamps SessionEnd/Interrupt to 3s — we set 3 so no startup warning.
     expect(interrupt.timeout).toBe(3)

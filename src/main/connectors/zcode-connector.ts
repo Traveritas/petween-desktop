@@ -156,7 +156,6 @@ const ZCODE_PROFILE: HookConnectorProfile<ZcodeHookKind> = {
   turnStartKinds: new Set<ZcodeHookKind>(['user-prompt-submit']),
   statsTurnIdKinds: new Set<ZcodeHookKind>(['stop']),
   editKinds: new Set<ZcodeHookKind>(['pre-tool-edit']),
-  toolNameByKind: TOOL_NAME_BY_KIND,
   emitVisual: emitZcodeVisual,
   turnStartEmitKinds: new Set<ZcodeHookKind>(['user-prompt-submit']),
   idleAfter: {

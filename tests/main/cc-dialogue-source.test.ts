@@ -130,7 +130,7 @@ describe('createCcDialogueSource', () => {
     await withProjects(async ({ claudeDir, file }) => {
       const source = createCcDialogueSource({ claudeDir: () => claudeDir, now: () => 1 })
       source.noteTranscript(SESSION, 'C:/Windows/system32/config.json') // outside projects
-      source.noteTranscript(SESSION, file.replace('/projects/', '/elsewhere/')) // sibling of projects
+      source.noteTranscript(SESSION, file.replace(/projects/, 'elsewhere-projects')) // sibling of projects (no-op-safe on win32 sep)
       source.noteTranscript(SESSION, '') // junk
       // Registry rejected everything → falls to scan → finds the real file.
       const preview = await source.latestReply(SESSION)

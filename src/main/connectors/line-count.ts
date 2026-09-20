@@ -93,6 +93,10 @@ export function countEditLines(toolName: string | undefined, toolInput: unknown)
   }
   const patch = asString(read('patch'))
   if (patch !== null) return countsFromPatch(patch)
+  // Codex's native apply_patch is a custom tool whose payload key is `input`
+  // (spike-verified on live rollouts: "*** Begin Patch…" freeform text).
+  const freeform = asString(read('input'))
+  if (freeform !== null && /^\*{3}\s+(Begin|Update|Add|Delete)/m.test(freeform)) return countsFromPatch(freeform)
   const edits = read('edits')
   if (Array.isArray(edits)) {
     let added = 0
@@ -108,7 +112,8 @@ export function countEditLines(toolName: string | undefined, toolInput: unknown)
     }
     if (edits.length > 0) return { added, removed }
   }
-  if (/write/i.test(name) && content === null) return { added: 0, removed: 0 }
+  // Unrecognized shape → null: "unknown" must not masquerade as "zero lines"
+  // (a write_file with an unexpected payload key reports no fact, not 0/0).
   return null
 }
 

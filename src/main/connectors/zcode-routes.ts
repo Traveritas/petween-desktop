@@ -11,6 +11,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { ZCODE_HOOK_KINDS, type ZcodeConnectorStatus, type ZcodeHookKind, type ZcodeHookPayload } from './zcode-connector'
+import { readBody, rejectsCrossOriginWrite, sendJson } from './route-helpers'
 
 export interface ZcodeConnectorRoutesDeps {
   /** False when the connector is disabled in settings — events are dropped. */
@@ -30,55 +31,6 @@ const SESSION_MAX_CHARS = 200
  * payload while covering any realistic file content (docs/06 §8).
  */
 const EVENT_BODY_LIMIT_BYTES = 1024 * 1024
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  if (res.destroyed || res.writableEnded) return
-  const text = JSON.stringify(body)
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(text),
-    'cache-control': 'no-store',
-  })
-  res.end(text)
-}
-
-/** The same write fence desktop-routes.ts implements (its rationale applies verbatim). */
-function rejectsCrossOriginWrite(req: IncomingMessage): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (typeof site === 'string' && site === 'cross-site') return true
-  const origin = req.headers.origin
-  if (origin !== undefined) {
-    if (typeof origin !== 'string' || typeof req.headers.host !== 'string') return true
-    try {
-      return new URL(origin).host !== req.headers.host
-    } catch {
-      return true
-    }
-  }
-  return false
-}
-
-function readBody(req: IncomingMessage, limitBytes: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    let overflowed = false
-    req.on('error', reject)
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > limitBytes) {
-        if (overflowed) return
-        overflowed = true
-        reject(new Error('body too large'))
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => {
-      if (!overflowed) resolve(Buffer.concat(chunks).toString('utf8'))
-    })
-  })
-}
 
 /**
  * Both body generations (docs/06 §8): Phase 10 hooks POST the stdin JSON

@@ -10,13 +10,20 @@
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-/** null = missing file (fresh install); throws on present-but-corrupt. */
+/**
+ * null = missing file (fresh install); throws on present-but-corrupt AND on
+ * transient read failures (EBUSY/EPERM/AV locks) — treating those as "fresh"
+ * would collapse the user's whole config into `{hooks: ...}` on write-back
+ * (v0.7.0 review P1: CC hot-reloads settings.json via atomic rename; our
+ * read can legitimately race into that window).
+ */
 export async function readConfigObject(path: string): Promise<Record<string, unknown> | null> {
   let text: string
   try {
     text = await readFile(path, 'utf8')
-  } catch {
-    return null // missing file: fresh install
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null // missing file: fresh install
+    throw error
   }
   try {
     const parsed: unknown = JSON.parse(text)
@@ -42,7 +49,14 @@ export async function writeConfigAtomic(path: string, config: Record<string, unk
   } catch {
     // absent on fresh installs — nothing to back up
   }
-  await rename(tmp, path)
+  try {
+    await rename(tmp, path)
+  } catch (error) {
+    // The tmp carries the FULL config (env secrets in ~/.claude/settings.json)
+    // — it must not linger past a failed swap (v0.7.0 review).
+    await rm(tmp, { force: true }).catch(() => {})
+    throw error
+  }
 }
 
 /**

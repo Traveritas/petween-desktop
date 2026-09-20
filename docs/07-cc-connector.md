@@ -52,7 +52,7 @@ CC stdin 解析（`parseCcHookBody`）：只收 JSON（无 legacy 世代）；`s
 
 ## 5. 安装 / 卸载（~/.claude/settings.json）
 
-`installCcHooks` / `uninstallCcHooks` / `ccHooksInstalled`，v0.4.0 四加固全量适用（config-io）：
+`installCcHooks` / `uninstallCcHooks` / `ccHooksInstalled`，加固全量适用（config-io；卸载后清 .petween-bak、顶层 hooks 非对象拒绝——与 docs/08 §4 对齐）：
 
 - **合并写**：`hooks` 之外的顶层键（`env` 含密钥、`model`、`permissions`…）与外来 hooks 组原样保留；每个我们管理的 CC 事件先滤掉旧自有组再追加。
 - **归属判定 = 精确 cfg 路径**：hook 的 args 里出现恰好等于我们某个 cfg 文件路径的字符串才算自有——兄弟目录（`cc-hooks.bak/`）的用户拷贝、任何外来 curl 永不匹配。
@@ -63,7 +63,7 @@ CC stdin 解析（`parseCcHookBody`）：只收 JSON（无 legacy 世代）；`s
 
 ## 6. 观察项 / 已知风险（真机验证清单）
 
-1. **负向前瞻 matcher 的锚定语义**（同 docs/06 §7.1）：`^(?!...$)` 假设 CC 用裸 `RegExp.test`。官方文档已写明「含正则字符 → 不锚定 RegExp.test」，风险低但未实测——症状同 zcode：Read/Grep 等工具期间宠物无工作表情。修正 = 换省略 matcher 的单条通用注册。
+1. ~~**负向前瞻 matcher 的锚定语义**~~（✅ 2026-09-20 真机验收实证三类工具表情全对上，docs/05 Phase 15 清单）。
 2. ~~**Notification 的触发面**~~（✅ 已实证并处理，见 §3 要点：回合后闲置提示污染 success 脸——摘除注册）。
 3. **SessionEnd 的 1.5s 预算**：回环 curl 实测毫秒级，但极端情况下（本服务正忙）hook 可能被掐——30min watchdog 兜底，无正确性风险。
 4. **stats 泡泡的回合口径**：CC 的 stop 一定带 `prompt_id`；若某事件缺失 turnId（版本差异），账本按无 turnId 容忍（回合差值退化为会话累计基线），泡泡照出只是精度略降。
@@ -96,5 +96,5 @@ Host 白名单（v0.4.0）对 CC 端点同样生效——routes-host dispatcher 
 - **transcript 形状（spike 实证，本机真实文件）**：混合行类型中只有 `user`/`assistant` 有用；**每条 `user` 行带 `promptId`**（= hook 载荷的 prompt_id = 账本 turnId），assistant 行不带——但 **parentUuid 父链 100% 可回溯**到所属 user 行（实测 6/6），回合匹配是精确的；回复文本 = 最后一条主链（非 `isSidechain`）带 text 块的 assistant 消息（多个 text 块拼接）——与 zcode「最后一条 stop 消息」同语义；`isApiErrorMessage` 条目跳过。
 - **session→源 解析**：`cc-dialogue-source` 持注册表，`index.ts` 在每个 hook 事件上用载荷的 `transcript_path` 喂它（`HookPayload.transcriptPath` 通用字段，zcode 不设）；应用中途重启（注册表空）时一次性扫描 `~/.claude/projects/*/<sessionId>.jsonl` 兜底（结果缓存，正负皆然）。
 - **路由多源化**：`GET /dialogue?session=` 的 deps 从单 `source` 改为 `sources[]`，顺序探测首个非空（zcode `sess_*` 与 CC UUID 实际不冲突，顺序不负载）；HUD 零改动。
-- **归约共享**：剥 markdown + 160 字截断提取为 `dialogue-text.ts`，两源共用——隐私不变量不变（内容只在源处归约、零持久化、no-store）。
+- **归约共享**：剥 markdown + 160 字截断提取为 `dialogue-text.ts`，两源共用——隐私不变量不变（内容只在源处归约、零持久化、no-store）。流式纪律与字节帽（64MB 总帽/4MB 行帽，v0.6.0 评审改流式）与 codex 源对齐；注册表仅收 `~/.claude/projects` 下路径（防伪造载荷把 /dialogue 变任意文件读预言机）。
 - 测试：`cc-dialogue-source.test.ts`（父链/sidechain/API 错误/最后带文本者/注册表/扫描兜底/非法 id）+ `dialogue-routes.test.ts` 多源探测改造。

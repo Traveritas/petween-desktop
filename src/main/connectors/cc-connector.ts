@@ -8,9 +8,10 @@
  * - `session-end` (CC SessionEnd): the session self-reports its end, so the
  *   engine disposes it immediately — no 30min-silence guess for a clean
  *   exit (the watchdog still covers crashed clients).
- * - PermissionRequest AND Notification both map onto `permission-request`
- *   (waiting visual + stranded-approval decay): CC sends PermissionRequest
- *   for approval prompts and Notification for "waiting for your input".
+ * - PermissionRequest maps onto `permission-request` (waiting visual +
+ *   stranded-approval decay). Notification is deliberately NOT registered
+ *   (v0.6.3): its post-turn "waiting for your input" idle nudge polluted the
+ *   success face with a phantom waiting face.
  * - No legacy payload-less hook generation: CC bodies are always stdin JSON
  *   with prompt_id (the turn id) and tool_name/tool_input on tool events.
  */
@@ -119,7 +120,6 @@ const CC_PROFILE: HookConnectorProfile<CcHookKind> = {
   turnStartKinds: new Set<CcHookKind>(['user-prompt-submit']),
   statsTurnIdKinds: new Set<CcHookKind>(['stop']),
   editKinds: new Set<CcHookKind>(['pre-tool-edit']),
-  toolNameByKind: TOOL_NAME_BY_KIND,
   emitVisual: emitCcVisual,
   turnStartEmitKinds: new Set<CcHookKind>(['user-prompt-submit']),
   idleAfter: {
