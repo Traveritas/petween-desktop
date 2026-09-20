@@ -26,6 +26,7 @@ import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import { createRoamerEngine } from './engine'
 import { normalizeRoamerOptions } from './options'
 import { IDLE_ACTION_ANIMATION_IDS, WALK_BOB_ANIMATION_ID } from './animations'
+import { createRoamerWindowHost, type RoamerWindowHost } from './windows'
 import {
   ROAMER_ID,
   type IdleActionId,
@@ -165,6 +166,26 @@ export function createRoamerCompanion(): DesktopCompanion {
         }
       }
 
+      const windowHost: RoamerWindowHost = createRoamerWindowHost()
+
+      const spawnWindow = (command: Extract<RoamerCommand, { type: 'spawn-window' }>): void => {
+        // The layer needs the pet's live box + viewport; a vanished session
+        // (snapshot null) has neither — skip the effect entirely.
+        const current = snapshot
+        if (current === null) return
+        windowHost.spawn({
+          kind: command.kind,
+          edge: command.edge,
+          content: command.content,
+          anchor: {
+            x: current.x,
+            y: current.y,
+            height: current.stageSize * current.scale,
+          },
+          viewport: current.viewport,
+        })
+      }
+
       const endIdleAction = (): void => {
         if (idleAnim !== null) {
           try {
@@ -197,6 +218,9 @@ export function createRoamerCompanion(): DesktopCompanion {
             break
           case 'idle-action-end':
             endIdleAction()
+            break
+          case 'spawn-window':
+            spawnWindow(command)
             break
         }
       }
@@ -242,6 +266,7 @@ export function createRoamerCompanion(): DesktopCompanion {
         unsubscribeDrag()
         endIdleAction()
         endWalk(false)
+        windowHost.dispose()
       }
     },
   }

@@ -13,7 +13,16 @@
  */
 import type { StageSnapshot } from 'petween/client/extension-service'
 import { IDLE_ACTION_DURATIONS_MS } from './animations'
-import type { IdleActionId, RoamerCommand, RoamerEvent, RoamerOptions, WanderLegPlan } from './types'
+import type {
+  IdleActionId,
+  MischiefActionId,
+  PullEdge,
+  RoamerCommand,
+  RoamerContentItem,
+  RoamerEvent,
+  RoamerOptions,
+  WanderLegPlan,
+} from './types'
 
 /** Quiet period after the pet first becomes usable — never wander instantly on boot. */
 const INITIAL_DELAY_MS = 6000
@@ -23,6 +32,10 @@ const LEASE_RETRY_MS = 3000
 const WALK_GRACE_FACTOR = 1.5
 const MIN_LEG_MS = 1200
 const MAX_LEG_MS = 30000
+/** Pull legs may be short hops toward the edge. */
+const MIN_PULL_LEG_MS = 600
+/** Already this close to the edge: pull without walking. */
+const PULL_SKIP_WALK_PX = 48
 /** Target margins keep the WHOLE pet on screen (§27 only guarantees 32px). */
 const TARGET_MARGIN_PX = 8
 const BOTTOM_MARGIN_PX = 12
@@ -39,6 +52,12 @@ interface WalkingMode {
   kind: 'walking'
   leg: WanderLegPlan
   startedAt: number
+  /**
+   * Batch 3: this walk serves a mischief pull — on leg-complete the
+   * content window spawns; on any abort the payload is silently dropped
+   * (a window pulled out mid-drag would be rude, not fun).
+   */
+  purpose: { kind: 'pull'; edge: PullEdge; content: RoamerContentItem } | null
 }
 
 interface IdleActionMode {
@@ -65,6 +84,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
   let pendingArm = false
   let nextWanderAt = Number.POSITIVE_INFINITY
   let nextIdleActionAt = Number.POSITIVE_INFINITY
+  let nextMischiefAt = Number.POSITIVE_INFINITY
 
   const between = (min: number, max: number): number => min + (max - min) * random()
 
@@ -142,6 +162,38 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
   const enabledIdleActions = (options: RoamerOptions): IdleActionId[] =>
     (Object.keys(options.idle.actions) as IdleActionId[]).filter((id) => options.idle.actions[id])
 
+  const mischiefIntervalMs = (options: RoamerOptions): number =>
+    between(options.mischief.minIntervalMs, options.mischief.maxIntervalMs)
+
+  /** Mischief actions the engine can actually perform in this batch. */
+  const SCHEDULED_MISCHIEF: readonly MischiefActionId[] = ['pullWindow', 'stickyNote']
+
+  const enabledMischief = (options: RoamerOptions): MischiefActionId[] =>
+    SCHEDULED_MISCHIEF.filter((id) => options.mischief.actions[id])
+
+  /** Nearest screen edge + the leg that reaches it (short hops allowed). */
+  const planPullLeg = (options: RoamerOptions): { edge: PullEdge; leg: WanderLegPlan } => {
+    const current = snapshot
+    const stage = current === null ? 128 : current.stageSize * current.scale
+    const viewport = current === null ? { width: 1920, height: 1080 } : current.viewport
+    const from =
+      current === null ? { x: viewport.width / 2, y: viewport.height / 2 } : { x: current.x, y: current.y }
+    const edgeMargin = 16
+    const leftX = edgeMargin
+    const rightX = Math.max(edgeMargin, viewport.width - stage - edgeMargin)
+    const edge: PullEdge = Math.abs(from.x - leftX) <= Math.abs(rightX - from.x) ? 'left' : 'right'
+    const to = {
+      x: edge === 'left' ? leftX : rightX,
+      y: Math.max(TARGET_MARGIN_PX, Math.min(from.y, viewport.height - stage - BOTTOM_MARGIN_PX)),
+    }
+    const distance = Math.hypot(to.x - from.x, to.y - from.y)
+    const durationMs = Math.min(
+      MAX_LEG_MS,
+      Math.max(MIN_PULL_LEG_MS, (distance / options.wander.speedPxPerSec) * 1000),
+    )
+    return { edge, leg: { from, to, durationMs } }
+  }
+
   return {
     apply(event: RoamerEvent): RoamerCommand[] {
       const commands: RoamerCommand[] = []
@@ -157,6 +209,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             userDragging = false
             nextWanderAt = Number.POSITIVE_INFINITY
             nextIdleActionAt = Number.POSITIVE_INFINITY
+            nextMischiefAt = Number.POSITIVE_INFINITY
             break
           }
           if (!armed && event.snapshot.started) {
@@ -178,6 +231,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             pendingArm = false
             nextWanderAt = event.now + INITIAL_DELAY_MS
             nextIdleActionAt = event.now + idleIntervalMs(options)
+            nextMischiefAt = event.now + mischiefIntervalMs(options)
           }
           if (!armed) break
           if (mode.kind === 'walking') {
@@ -197,11 +251,66 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
               break
             }
           }
-          if (autonomyOpen(options) && options.wander.enabled && event.now >= nextWanderAt) {
+          // Decision priority: mischief (rare, purposeful) > wander > idle.
+          const autonomous = autonomyOpen(options)
+          let decided = false
+          if (
+            autonomous &&
+            options.mischief.enabled &&
+            event.now >= nextMischiefAt &&
+            enabledMischief(options).length > 0
+          ) {
+            const pool = options.contentPool
+            if (pool.length === 0) {
+              // Nothing to show yet — retry next interval without blocking
+              // the other decisions below.
+              nextMischiefAt = event.now + mischiefIntervalMs(options)
+            } else {
+              decided = true
+              const candidates = enabledMischief(options)
+              const action = candidates[Math.floor(random() * candidates.length)]
+              const content = pool[Math.floor(random() * pool.length)]
+              nextMischiefAt = event.now + mischiefIntervalMs(options)
+              if (action === 'stickyNote') {
+                // Stationary mischief: a quick shake "places" the note.
+                const durationMs = IDLE_ACTION_DURATIONS_MS.shake
+                mode = { kind: 'idle-action', action: 'shake', startedAt: event.now, durationMs }
+                commands.push({ type: 'idle-action-start', action: 'shake', durationMs })
+                commands.push({ type: 'spawn-window', kind: 'note', content })
+              } else {
+                const { edge, leg } = planPullLeg(options)
+                const distance = Math.hypot(leg.to.x - leg.from.x, leg.to.y - leg.from.y)
+                if (distance < PULL_SKIP_WALK_PX) {
+                  commands.push({ type: 'spawn-window', kind: 'pull', edge, content })
+                } else {
+                  mode = {
+                    kind: 'walking',
+                    leg,
+                    startedAt: event.now,
+                    purpose: { kind: 'pull', edge, content },
+                  }
+                  commands.push({ type: 'wander-start', ...leg })
+                }
+              }
+            }
+          }
+          if (
+            !decided &&
+            autonomous &&
+            options.wander.enabled &&
+            event.now >= nextWanderAt
+          ) {
+            decided = true
             const leg = planLeg(options)
-            mode = { kind: 'walking', leg, startedAt: event.now }
+            mode = { kind: 'walking', leg, startedAt: event.now, purpose: null }
             commands.push({ type: 'wander-start', ...leg })
-          } else if (autonomyOpen(options) && options.idle.enabled && event.now >= nextIdleActionAt) {
+          }
+          if (
+            !decided &&
+            autonomous &&
+            options.idle.enabled &&
+            event.now >= nextIdleActionAt
+          ) {
             const enabled = enabledIdleActions(options)
             if (enabled.length === 0) {
               nextIdleActionAt = Number.POSITIVE_INFINITY
@@ -215,7 +324,14 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           break
         }
         case 'leg-complete': {
+          // A completed pull leg drops its payload window right where the
+          // pet landed (any abort path drops it silently instead).
+          const purpose = mode.kind === 'walking' ? mode.purpose : null
           endWalk(true, event.now, commands)
+          if (purpose !== null) {
+            commands.push({ type: 'spawn-window', kind: 'pull', edge: purpose.edge, content: purpose.content })
+            nextMischiefAt = event.now + mischiefIntervalMs(deps.getOptions())
+          }
           break
         }
         case 'lease-denied': {
@@ -242,8 +358,9 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
         }
         case 'hidden': {
           // rAF never fires while hidden — settle the leg where it stands
-          // and cut an in-flight idle action (its flash hold would linger
-          // invisibly past the window's return).
+          // (a pending pull payload is dropped: never spawn into a hidden
+          // window) and cut an in-flight idle action (its flash hold would
+          // linger invisibly past the window's return).
           endWalk(true, event.now, commands)
           endIdleAction(commands)
           nextIdleActionAt = event.now + idleIntervalMs(deps.getOptions())

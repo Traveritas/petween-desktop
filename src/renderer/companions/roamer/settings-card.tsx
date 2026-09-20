@@ -11,8 +11,8 @@
  * never inside setState updaters (StrictMode double-invokes them).
  */
 import { useEffect, useState, type CSSProperties } from 'react'
-import { DEFAULT_IDLE, DEFAULT_WANDER } from './options'
-import { ROAMER_ID, type IdleActionId } from './types'
+import { DEFAULT_IDLE, DEFAULT_MISCHIEF, DEFAULT_WANDER } from './options'
+import { ROAMER_ID, type IdleActionId, type MischiefActionId, type RoamerContentItem } from './types'
 
 interface OptionBag {
   wander?: {
@@ -28,6 +28,13 @@ interface OptionBag {
     minIntervalMs?: number
     maxIntervalMs?: number
   }
+  mischief?: {
+    enabled?: boolean
+    actions?: Partial<Record<MischiefActionId, boolean>>
+    minIntervalMs?: number
+    maxIntervalMs?: number
+  }
+  contentPool?: RoamerContentItem[]
   [key: string]: unknown
 }
 
@@ -38,6 +45,14 @@ const IDLE_ACTION_LABELS: Record<IdleActionId, string> = {
   shake: '抖毛',
 }
 const IDLE_ACTION_ORDER: IdleActionId[] = ['doze', 'lookAround', 'sway', 'shake']
+
+const MISCHIEF_ACTION_LABELS: Record<MischiefActionId, string> = {
+  pullWindow: '拉内容窗',
+  stickyNote: '贴便签',
+  dashAcross: '冲过屏幕',
+  edgePeek: '探头窥视',
+}
+const MISCHIEF_ACTION_ORDER: MischiefActionId[] = ['pullWindow', 'stickyNote', 'dashAcross', 'edgePeek']
 
 export function RoamerCard(): JSX.Element {
   const [bag, setBag] = useState<OptionBag | null>(null)
@@ -85,6 +100,55 @@ export function RoamerCard(): JSX.Element {
 
   const patchIdleAction = (action: IdleActionId, value: boolean): void => {
     patchIdle('actions', { ...(bag?.idle?.actions ?? {}), [action]: value })
+  }
+
+  const patchMischief = (field: string, value: unknown): void => {
+    const merged: OptionBag = {
+      ...(bag ?? {}),
+      mischief: { ...(bag?.mischief ?? {}), [field]: value },
+    }
+    setBag(merged)
+    void fetch('/api/petween-desktop/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
+    }).catch(() => {})
+  }
+
+  const patchMischiefAction = (action: MischiefActionId, value: boolean): void => {
+    patchMischief('actions', { ...(bag?.mischief?.actions ?? {}), [action]: value })
+  }
+
+  const patchPool = (pool: RoamerContentItem[]): void => {
+    const merged: OptionBag = { ...(bag ?? {}), contentPool: pool }
+    setBag(merged)
+    void fetch('/api/petween-desktop/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
+    }).catch(() => {})
+  }
+
+  /** Upload through the petween asset pipeline, then append to the pool. */
+  const addImage = (file: File): void => {
+    const form = new FormData()
+    form.append('file', file)
+    void fetch('/api/petween/assets', { method: 'POST', body: form })
+      .then((response) => (response.ok ? (response.json() as Promise<{ asset: { id: string; url: string } }>) : null))
+      .then((body) => {
+        if (body === null) return
+        patchPool([
+          ...(bag?.contentPool ?? []),
+          { id: `pool-${body.asset.id}`, kind: 'image', url: body.asset.url },
+        ])
+      })
+      .catch(() => {})
+  }
+
+  const addText = (text: string): void => {
+    const trimmed = text.trim()
+    if (trimmed === '') return
+    patchPool([...(bag?.contentPool ?? []), { id: `pool-text-${Date.now()}`, kind: 'text', text: trimmed }])
   }
 
   if (bag === null) return <p className="rowHint">加载中…</p>
@@ -192,6 +256,93 @@ export function RoamerCard(): JSX.Element {
           onChange={(event) => patchIdle('maxIntervalMs', Number(event.target.value))}
         />
         <span className="rowHint">ms（与游走共用触发时机）</span>
+      </div>
+      <div style={rowStyle}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={bag.mischief?.enabled ?? DEFAULT_MISCHIEF.enabled}
+            onChange={(event) => patchMischief('enabled', event.target.checked)}
+          />
+          <span className="rowHint">捣乱</span>
+        </label>
+        {MISCHIEF_ACTION_ORDER.map((action) => (
+          <label key={action} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={bag.mischief?.actions?.[action] ?? DEFAULT_MISCHIEF.actions[action]}
+              onChange={(event) => patchMischiefAction(action, event.target.checked)}
+            />
+            <span className="rowHint">{MISCHIEF_ACTION_LABELS[action]}</span>
+          </label>
+        ))}
+      </div>
+      <div style={rowStyle}>
+        <span className="rowHint" style={labelStyle}>间隔</span>
+        <input
+          type="number"
+          min={5000}
+          max={7200000}
+          step={60000}
+          style={numberStyle}
+          value={bag.mischief?.minIntervalMs ?? DEFAULT_MISCHIEF.minIntervalMs}
+          onChange={(event) => patchMischief('minIntervalMs', Number(event.target.value))}
+        />
+        <span className="rowHint">至</span>
+        <input
+          type="number"
+          min={5000}
+          max={7200000}
+          step={60000}
+          style={numberStyle}
+          value={bag.mischief?.maxIntervalMs ?? DEFAULT_MISCHIEF.maxIntervalMs}
+          onChange={(event) => patchMischief('maxIntervalMs', Number(event.target.value))}
+        />
+        <span className="rowHint">ms（拉窗与便签共用内容池）</span>
+      </div>
+      <div style={rowStyle}>
+        <span className="rowHint" style={labelStyle}>内容池</span>
+        <label className="rowHint" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          ＋图片
+          <input
+            type="file"
+            accept="image/*"
+            style={{ maxWidth: 180 }}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              if (file !== undefined) addImage(file)
+            }}
+          />
+        </label>
+      </div>
+      {(bag.contentPool ?? []).map((item, index) => (
+        <div key={item.id} style={{ ...rowStyle, marginLeft: 12 }}>
+          {item.kind === 'image' ? (
+            <img src={item.url} alt="" style={{ maxWidth: 56, maxHeight: 40, objectFit: 'contain', borderRadius: 4 }} />
+          ) : (
+            <span className="rowHint" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.text}
+            </span>
+          )}
+          <span className="rowHint">{item.kind === 'image' ? '图片' : '文本'}</span>
+          <button type="button" onClick={() => patchPool((bag.contentPool ?? []).filter((_, i) => i !== index))}>
+            删除
+          </button>
+        </div>
+      ))}
+      <div style={rowStyle}>
+        <input
+          type="text"
+          placeholder="添加一条文本内容（回车确认）"
+          style={{ flex: '1 1 auto', minWidth: 200 }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            const input = event.target as HTMLInputElement
+            addText(input.value)
+            input.value = ''
+          }}
+        />
       </div>
       <p className="rowHint">仅闲时=无 Agent 会话忙碌时才行动；永远=任何状态都行动（姿势仍显示工作状态）。拖住宠物会立即让它停下。</p>
     </div>

@@ -96,6 +96,9 @@ export interface WanderLegPlan {
   durationMs: number
 }
 
+/** Which screen edge a pulled window slides in from. */
+export type PullEdge = 'left' | 'right'
+
 export type RoamerCommand =
   | ({ type: 'wander-start' } & WanderLegPlan)
   /**
@@ -113,3 +116,8 @@ export type RoamerCommand =
   | { type: 'idle-action-start'; action: IdleActionId; durationMs: number }
   /** Cancel/settle an in-flight idle action (restore any active flash). */
   | { type: 'idle-action-end' }
+  /**
+   * Drop mischief content onto the desktop: a pulled window sliding in
+   * from `edge` anchored near the pet, or a sticky note at a random spot.
+   */
+  | { type: 'spawn-window'; kind: 'pull' | 'note'; edge?: PullEdge; content: RoamerContentItem }

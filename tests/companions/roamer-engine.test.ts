@@ -10,13 +10,16 @@ import type { StageSnapshot } from 'petween/client/extension-service'
 import { createRoamerEngine } from '../../src/renderer/companions/roamer/engine'
 import {
   DEFAULT_IDLE,
+  DEFAULT_MISCHIEF,
   DEFAULT_WANDER,
   normalizeRoamerOptions,
 } from '../../src/renderer/companions/roamer/options'
 import { IDLE_ACTION_DURATIONS_MS } from '../../src/renderer/companions/roamer/animations'
 import type {
   RoamerCommand,
+  RoamerContentItem,
   RoamerIdleOptions,
+  RoamerMischiefOptions,
   RoamerWanderOptions,
 } from '../../src/renderer/companions/roamer/types'
 
@@ -41,13 +44,17 @@ const snap = (overrides: Partial<StageSnapshot> = {}): StageSnapshot => ({
 
 /** Engine with default options and random() => 0.5 unless overridden. */
 const engineWith = (
-  options?: Partial<RoamerWanderOptions>,
+  wander?: Partial<RoamerWanderOptions>,
   idle?: Partial<RoamerIdleOptions>,
   random: () => number = () => 0.5,
+  mischief?: Partial<RoamerMischiefOptions>,
+  contentPool?: RoamerContentItem[],
 ) => {
   const bag = {
-    wander: { ...DEFAULT_WANDER, ...options },
+    wander: { ...DEFAULT_WANDER, ...wander },
     idle: { ...DEFAULT_IDLE, ...idle },
+    mischief: { ...DEFAULT_MISCHIEF, ...mischief },
+    contentPool: contentPool ?? [],
   }
   return createRoamerEngine({ getOptions: () => normalizeRoamerOptions(bag), random })
 }
@@ -281,6 +288,116 @@ describe('idle actions', () => {
 
     engine.apply({ type: 'tick', now: T0 + 3600 }) // action #3 in flight
     expect(engine.apply({ type: 'stage', snapshot: null })).toEqual([{ type: 'idle-action-end' }])
+  })
+})
+
+describe('mischief', () => {
+  const pool = [
+    { id: 'p1', kind: 'image' as const, url: '/petween-assets/a' },
+    { id: 'p2', kind: 'text' as const, text: '便签内容' },
+  ]
+
+  it('fires a sticky note immediately (shake flavor + spawn), stationary', () => {
+    // interval 5000ms so mischief is the first decision; wander would be 6000.
+    const engine = engineWith(undefined, undefined, undefined, { minIntervalMs: 5000, maxIntervalMs: 5000 }, pool)
+    arm(engine)
+    const commands = engine.apply({ type: 'tick', now: T0 + 5000 })
+    expect(types(commands)).toEqual(['idle-action-start', 'spawn-window'])
+    const idle = commands[0] as Extract<RoamerCommand, { type: 'idle-action-start' }>
+    expect(idle.action).toBe('shake')
+    const spawn = commands[1] as Extract<RoamerCommand, { type: 'spawn-window' }>
+    expect(spawn.kind).toBe('note')
+    // random()=0.5 → index 1 of the pool
+    expect(spawn.content.id).toBe('p2')
+  })
+
+  it('walks to the nearest edge first, then spawns the pulled window on leg-complete', () => {
+    const engine = engineWith(
+      undefined,
+      undefined,
+      undefined,
+      { minIntervalMs: 5000, maxIntervalMs: 5000, actions: { stickyNote: false } },
+      pool,
+    )
+    arm(engine)
+    const start = walkStartAt(engine, T0 + 5000)
+    // pet at x=960, stage 128: left edge 16 (944 away), right edge 1776 (816 away) → right
+    expect(start.to.x).toBe(1776)
+
+    const commands = engine.apply({ type: 'leg-complete', now: T0 + 5000 + start.durationMs })
+    expect(types(commands)).toEqual(['wander-end', 'spawn-window'])
+    expect(commands[0]).toMatchObject({ type: 'wander-end', commit: true })
+    const spawn = commands[1] as Extract<RoamerCommand, { type: 'spawn-window' }>
+    expect(spawn.kind).toBe('pull')
+    expect(spawn.edge).toBe('right')
+  })
+
+  it('pulls without walking when already at the edge', () => {
+    const engine = engineWith(
+      undefined,
+      undefined,
+      undefined,
+      { minIntervalMs: 5000, maxIntervalMs: 5000, actions: { stickyNote: false } },
+      pool,
+    )
+    arm(engine, snap({ x: 1750 }))
+    const commands = engine.apply({ type: 'tick', now: T0 + 5000 })
+    expect(types(commands)).toEqual(['spawn-window'])
+    expect(commands[0]).toMatchObject({ kind: 'pull', edge: 'right' })
+  })
+
+  it('drops the pull payload when the leg is aborted by a drag', () => {
+    const engine = engineWith(
+      undefined,
+      undefined,
+      undefined,
+      { minIntervalMs: 5000, maxIntervalMs: 5000, actions: { stickyNote: false } },
+      pool,
+    )
+    arm(engine)
+    walkStartAt(engine, T0 + 5000)
+    // drag abort emits only wander-end — the window never spawns
+    expect(engine.apply({ type: 'drag', phase: 'start', now: T0 + 5400 })).toEqual([
+      { type: 'wander-end', commit: false },
+    ])
+    expect(types(engine.apply({ type: 'leg-complete', now: T0 + 9999 }))).toEqual([])
+  })
+
+  it('reschedules silently when the content pool is empty', () => {
+    const engine = engineWith(
+      { enabled: false },
+      { enabled: false },
+      undefined,
+      { minIntervalMs: 5000, maxIntervalMs: 5000 },
+    )
+    arm(engine)
+    expect(types(engine.apply({ type: 'tick', now: T0 + 5000 }))).toEqual([])
+    // still nothing one tick later; fires one full interval after the skip
+    expect(types(engine.apply({ type: 'tick', now: T0 + 6000 }))).toEqual([])
+  })
+
+  it('respects the mischief master toggle and per-action toggles', () => {
+    const disabled = engineWith(
+      { enabled: false },
+      { enabled: false },
+      undefined,
+      { enabled: false, minIntervalMs: 5000, maxIntervalMs: 5000 },
+    )
+    arm(disabled)
+    expect(types(disabled.apply({ type: 'tick', now: T0 + 100000 }))).toEqual([])
+
+    const allOff = engineWith(
+      { enabled: false },
+      { enabled: false },
+      undefined,
+      {
+        minIntervalMs: 5000,
+        maxIntervalMs: 5000,
+        actions: { pullWindow: false, stickyNote: false },
+      },
+    )
+    arm(allOff)
+    expect(types(allOff.apply({ type: 'tick', now: T0 + 100000 }))).toEqual([])
   })
 })
 
