@@ -67,7 +67,7 @@ CC stdin 解析（`parseCcHookBody`）：只收 JSON（无 legacy 世代）；`s
 2. **Notification 的触发面**：文档截断未拿到完整字段表；若 Notification 还在不合适的时机触发（如自动授权通知），waiting 视觉可能偏多——真机观察，必要时从注册表里摘掉 Notification 只留 PermissionRequest。
 3. **SessionEnd 的 1.5s 预算**：回环 curl 实测毫秒级，但极端情况下（本服务正忙）hook 可能被掐——30min watchdog 兜底，无正确性风险。
 4. **stats 泡泡的回合口径**：CC 的 stop 一定带 `prompt_id`；若某事件缺失 turnId（版本差异），账本按无 turnId 容忍（回合差值退化为会话累计基线），泡泡照出只是精度略降。
-5. **对话泡泡（回复摘要）后置**：CC 载荷带 `transcript_path`（`~/.claude/projects/<cwd-slug>/<session-id>.jsonl`），可作 dialogue 数据源——v0.3.0 的 zcode dialogue-source 模式可平移（尾读 + 截断 + no-store）。本批不做，触发 = 用户拍板要 CC 的回复泡泡。
+5. ~~**对话泡泡（回复摘要）后置**~~（✅ 同日解绑批落地，见 §9）：CC 载荷带 `transcript_path`（`~/.claude/projects/<cwd-slug>/<session-id>.jsonl`）。
 
 ## 7. 模块清单
 
@@ -78,6 +78,8 @@ CC stdin 解析（`parseCcHookBody`）：只收 JSON（无 legacy 世代）；`s
 | `src/main/connectors/cc-routes.ts` | 四个 HTTP 端点（event/status/install/uninstall） |
 | `src/main/index.ts` | 生命周期接线：boot 写 cfg、启停随设置（镜像 zcode 块） |
 | `src/renderer/settings/main.tsx` | 连接分区 Claude Code 卡片（HookConnectorCard） |
+| `src/main/connectors/cc-dialogue-source.ts` | 回复文本源：transcript 父链回溯 + 注册表/扫描（§9） |
+| `src/main/connectors/dialogue-text.ts` | 回复预览归约（剥 markdown/截断）——各源共享 |
 
 Host 白名单（v0.4.0）对 CC 端点同样生效——routes-host dispatcher 一处覆盖。
 
@@ -86,3 +88,13 @@ Host 白名单（v0.4.0）对 CC 端点同样生效——routes-host dispatcher 
 - `tests/main/cc-hooks.test.ts`：cfg 渲染/端口重写、events 形状（exec 形式/秒 timeout/matcher 三组/共用 cfg）、合并安装（保留 env 密钥与 Pebrel 式外来 hooks）、幂等重装、损坏/非数组拒绝、.bak、并发串行化、精确归属（兄弟目录）。
 - `tests/main/cc-connector.test.ts`：事件映射（含 session-end 即时 dispose 且定时器随死）、watchdog 三时值、follow 门控+切换（v0.4.0 语义）、stats（prompt_id→turnId、Edit 形状计数、session-end 清行）。
 - `tests/main/cc-routes.test.ts`：parseCcHookBody（CC stdin 形状/坏输入）、sink 校验（未知 kind/坏 session/禁用时丢弃/跨源 403/非 POST 405）、status/install/uninstall 真实 HTTP。
+
+## 9. 对话泡泡解绑（2026-09-20 同日追加，v0.5.1）
+
+对话泡泡原本绑定 zcode（dialogue-source 写死读 rollout 目录）。解绑批落地多源架构，CC 回复泡泡即点亮：
+
+- **transcript 形状（spike 实证，本机真实文件）**：混合行类型中只有 `user`/`assistant` 有用；**每条 `user` 行带 `promptId`**（= hook 载荷的 prompt_id = 账本 turnId），assistant 行不带——但 **parentUuid 父链 100% 可回溯**到所属 user 行（实测 6/6），回合匹配是精确的；回复文本 = 最后一条主链（非 `isSidechain`）带 text 块的 assistant 消息（多个 text 块拼接）——与 zcode「最后一条 stop 消息」同语义；`isApiErrorMessage` 条目跳过。
+- **session→源 解析**：`cc-dialogue-source` 持注册表，`index.ts` 在每个 hook 事件上用载荷的 `transcript_path` 喂它（`HookPayload.transcriptPath` 通用字段，zcode 不设）；应用中途重启（注册表空）时一次性扫描 `~/.claude/projects/*/<sessionId>.jsonl` 兜底（结果缓存，正负皆然）。
+- **路由多源化**：`GET /dialogue?session=` 的 deps 从单 `source` 改为 `sources[]`，顺序探测首个非空（zcode `sess_*` 与 CC UUID 实际不冲突，顺序不负载）；HUD 零改动。
+- **归约共享**：剥 markdown + 160 字截断提取为 `dialogue-text.ts`，两源共用——隐私不变量不变（内容只在源处归约、零持久化、no-store）。
+- 测试：`cc-dialogue-source.test.ts`（父链/sidechain/API 错误/最后带文本者/注册表/扫描兜底/非法 id）+ `dialogue-routes.test.ts` 多源探测改造。

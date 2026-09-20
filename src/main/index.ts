@@ -27,6 +27,7 @@ import { registerCcConnectorRoutes } from './connectors/cc-routes'
 import { createStatsLedger } from './connectors/stats-ledger'
 import { registerStatsRoutes } from './connectors/stats-routes'
 import { createDialogueSource } from './connectors/dialogue-source'
+import { createCcDialogueSource } from './connectors/cc-dialogue-source'
 import { registerDialogueRoutes } from './connectors/dialogue-routes'
 import {
   installZcodeHooks,
@@ -266,8 +267,11 @@ async function bootstrap(): Promise<void> {
   registerStatsRoutes({ webServer: server.webServer }, { snapshot: (since) => statsLedger.snapshot(since) })
   // Phase 10 second batch: reply-text previews from the zcode rollout files
   // (on-demand read, truncated at the source — the one content-level channel).
+  // Phase 15 unbinding: multi-source — CC's transcript registry feeds from
+  // hook payloads; the route probes sources in order.
   const dialogueSource = createDialogueSource({ cliDir: () => join(homedir(), '.zcode', 'cli'), now: () => Date.now() })
-  registerDialogueRoutes({ webServer: server.webServer }, { source: dialogueSource })
+  const ccDialogueSource = createCcDialogueSource({ claudeDir: () => join(homedir(), '.claude'), now: () => Date.now() })
+  registerDialogueRoutes({ webServer: server.webServer }, { sources: [ccDialogueSource, dialogueSource] })
   const zcodeEnabled = (): boolean => settingsStore?.get().connectors.zcode.enabled ?? true
   const syncZcodeCfgFiles = (): Promise<void> => {
     if (!zcodeEnabled() || server === null) return Promise.resolve()
@@ -317,7 +321,14 @@ async function bootstrap(): Promise<void> {
   void syncCcCfgFiles()
   registerCcConnectorRoutes({ webServer: server.webServer }, {
     isEnabled: ccEnabled,
-    onHookEvent: (input) => ccConnector.handle(input),
+    onHookEvent: (input) => {
+      ccConnector.handle(input)
+      // Every event refreshes the dialogue registry — the transcript path
+      // is right there in the payload (survives app restarts mid-session).
+      if (input.payload?.transcriptPath !== undefined) {
+        ccDialogueSource.noteTranscript(input.sessionId, input.payload.transcriptPath)
+      }
+    },
     connectorStatus: async () => ({
       ...ccConnector.status(),
       enabled: ccEnabled(),

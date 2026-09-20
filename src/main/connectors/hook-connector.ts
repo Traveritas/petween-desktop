@@ -22,6 +22,12 @@ export interface HookPayload {
   turnId?: string
   /** Epoch ms from the CLI's own timestamp field; absent falls back to arrival time. */
   at?: number
+  /**
+   * CC (and CLIs that persist one): the session transcript file path from
+   * the payload — feeds the dialogue source's session registry. zcode never
+   * sets it (its rollout path is derivable).
+   */
+  transcriptPath?: string
 }
 
 export type HookLedgerState = 'idle' | 'thinking' | 'working' | 'waiting' | 'success'

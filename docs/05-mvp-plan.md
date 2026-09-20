@@ -590,13 +590,13 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 
 - [ ] 设置→连接→Claude Code「安装 hooks」→ 状态点亮；**无需重启 CC**，新会话即联动
 - [ ] 猫在工作（编辑/命令/其他工具分别对上表情）→ 思考 → 等待授权（PermissionRequest/Notification）→ 成功 60s 衰减
-- [ ] 泡泡：思考计时/编辑行数（CC 的 Edit/Write/MultiEdit 形状）/完成摘要全链路
+- [ ] 泡泡：思考计时/编辑行数（CC 的 Edit/Write/MultiEdit 形状）/完成摘要/回复文本（v0.5.1 解绑后 CC 也点亮）全链路
 - [ ] 会话结束（SessionEnd）宠物立即收泡回待机；CC 崩溃 30min 惰性 dispose 兜底
 - [ ] 卸载 hooks：settings.json 恢复（外来 hooks/env 完整）
 
 ### 后置项
 
-- CC 对话泡泡（回复摘要）：`transcript_path` 可作 dialogue 数据源，zcode dialogue-source 模式可平移——用户拍板后做。
+- ~~CC 对话泡泡（回复摘要）~~（✅ 同日解绑批完成，v0.5.1：dialogue 多源化 + cc-dialogue-source 父链回溯，详见 docs/07 §9；真机验收项并入下方清单）。
 - Notification 触发面观察（docs/07 §6.2）：不合适的等待视觉 → 摘掉 Notification 注册只留 PermissionRequest。
 
 ## Phase 16：Codex 连接器（跟随 Phase 15）

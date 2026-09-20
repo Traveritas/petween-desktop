@@ -13,6 +13,9 @@
 import { createInterface } from 'node:readline'
 import { open } from 'node:fs/promises'
 import { join } from 'node:path'
+import { truncatePreview, DIALOGUE_MAX_CHARS } from './dialogue-text'
+
+export { truncatePreview, DIALOGUE_MAX_CHARS }
 
 export interface DialoguePreview {
   sessionId: string
@@ -21,8 +24,6 @@ export interface DialoguePreview {
   text: string
   at: number
 }
-
-export const DIALOGUE_MAX_CHARS = 160
 /** Safety cap on candidate lines kept while streaming (one per turn in practice). */
 const MAX_CANDIDATES = 64
 /** Per-line bound: real model lines top out a little over 1 MB; anything larger is damage. */
@@ -62,22 +63,7 @@ export function extractLastReply(lines: string[]): { turnId: string | null; text
   return best
 }
 
-/** Reply previews show PLAIN text — markdown markers would read as noise. */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*([^*\n]+)\*/g, '$1')
-    .replace(/^#{1,6}\s*/gm, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-}
-
-export function truncatePreview(text: string): string {
-  const single = stripMarkdown(text).replace(/\s+/g, ' ').trim()
-  if (single.length <= DIALOGUE_MAX_CHARS) return single
-  return `${single.slice(0, DIALOGUE_MAX_CHARS - 1).trimEnd()}…`
-}
+/** Reply previews show PLAIN text — markdown stripping + truncation live in dialogue-text.ts (shared with the CC source). */
 
 export interface DialogueSource {
   /** Null when the session has no rollout file (yet) or no completed reply. */

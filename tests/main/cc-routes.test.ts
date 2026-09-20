@@ -50,13 +50,13 @@ afterEach(async () => {
 })
 
 describe('parseCcHookBody', () => {
-  it('maps the CC stdin shape: session_id, prompt_id → turnId, tool_name, tool_input', () => {
+  it('maps the CC stdin shape: session_id, prompt_id → turnId, tool_name, tool_input, transcript_path', () => {
     const parsed = parseCcHookBody(
       JSON.stringify({
         hook_event_name: 'PreToolUse',
         session_id: 'cc_s1',
         prompt_id: 'prompt_42',
-        transcript_path: '~/.claude/projects/x/cc_s1.jsonl',
+        transcript_path: 'C:/Users/t/.claude/projects/D--proj/cc_s1.jsonl',
         cwd: 'D:/proj',
         tool_name: 'Edit',
         tool_input: { file_path: 'a.ts', old_string: 'x', new_string: 'y' },
@@ -67,6 +67,7 @@ describe('parseCcHookBody', () => {
       payload: {
         toolName: 'Edit',
         turnId: 'prompt_42',
+        transcriptPath: 'C:/Users/t/.claude/projects/D--proj/cc_s1.jsonl',
         toolInput: { file_path: 'a.ts', old_string: 'x', new_string: 'y' },
       },
     })

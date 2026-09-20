@@ -45,8 +45,10 @@ export function parseCcHookBody(body: string): { sessionId: string; payload?: Cc
     const payload: CcHookPayload = {}
     const toolName = pickString(parsed.tool_name, parsed.toolName)
     const turnId = pickString(parsed.prompt_id, parsed.promptId)
+    const transcriptPath = pickString(parsed.transcript_path, parsed.transcriptPath)
     if (toolName !== null) payload.toolName = toolName
     if (turnId !== null) payload.turnId = turnId
+    if (transcriptPath !== null) payload.transcriptPath = transcriptPath
     if (parsed.tool_input !== undefined) payload.toolInput = parsed.tool_input
     else if (parsed.toolInput !== undefined) payload.toolInput = parsed.toolInput
     return { sessionId, payload }

@@ -15,12 +15,15 @@ let base: string
 let dispose: () => void
 
 const latestReply = vi.fn()
+const fallbackReply = vi.fn()
 
 beforeEach(async () => {
   latestReply.mockReset()
+  fallbackReply.mockReset()
   const table = createRouteTable()
-  const source = { latestReply } as unknown as DialogueSource
-  dispose = registerDialogueRoutes(table.host, { source })
+  const primary = { latestReply } as unknown as DialogueSource
+  const fallback = { latestReply: fallbackReply } as unknown as DialogueSource
+  dispose = registerDialogueRoutes(table.host, { sources: [primary, fallback] })
   server = createServer(table.handleRequest)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
@@ -32,23 +35,33 @@ afterEach(async () => {
 })
 
 describe(`GET ${DIALOGUE_PATH}`, () => {
-  it('serves the preview json with no-store', async () => {
-    latestReply.mockResolvedValueOnce({ sessionId: 's1', turnId: 't1', text: 'hi', at: 5 })
+  it('serves the first non-null preview with no-store', async () => {
+    latestReply.mockResolvedValueOnce(null)
+    fallbackReply.mockResolvedValueOnce({ sessionId: 's1', turnId: 't1', text: 'hi', at: 5 })
     const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
     expect(await res.json()).toEqual({ sessionId: 's1', turnId: 't1', text: 'hi', at: 5 })
     expect(latestReply).toHaveBeenCalledWith('s1')
+    expect(fallbackReply).toHaveBeenCalledWith('s1')
   })
 
-  it('answers 404 NO_REPLY when the source has nothing', async () => {
+  it('stops probing at the first source that answers', async () => {
+    latestReply.mockResolvedValueOnce({ sessionId: 's1', turnId: 't1', text: 'primary', at: 5 })
+    const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
+    expect(await res.json()).toMatchObject({ text: 'primary' })
+    expect(fallbackReply).not.toHaveBeenCalled()
+  })
+
+  it('answers 404 NO_REPLY when every source has nothing', async () => {
     latestReply.mockResolvedValueOnce(null)
+    fallbackReply.mockResolvedValueOnce(null)
     const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
     expect(res.status).toBe(404)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('NO_REPLY')
   })
 
-  it('answers 500 INTERNAL when the source rejects', async () => {
+  it('answers 500 INTERNAL when a source rejects', async () => {
     latestReply.mockRejectedValueOnce(new Error('boom'))
     const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
     expect(res.status).toBe(500)
