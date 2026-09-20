@@ -18,12 +18,35 @@ export interface DesktopCompanionContext {
   petween: PetweenClientService
 }
 
+/**
+ * The settings-card contract: a CONTROLLED component. The settings page owns
+ * the draft (and its 取消/应用 bar); the card renders `value` and reports
+ * full-bag edits through `onChange`. Cards never fetch or PUT on their own.
+ */
+export interface PluginSettingsCardProps {
+  /** The companion's current settings bag — opaque to the shell. */
+  value: unknown
+  onChange(next: unknown): void
+}
+
+/**
+ * A companion's own persisted config when it keeps its store OUTSIDE the
+ * shell's settings document (e.g. petween-physics's config.json). When
+ * present, the plugin page edits this bag through the card and saves it
+ * through this store instead of companions.options[id].
+ */
+export interface DesktopCompanionConfigStore {
+  load(): Promise<unknown>
+  save(config: unknown): Promise<void>
+}
+
 export interface DesktopCompanion {
   id: string
   displayName: string
   description?: string
-  /** Optional settings UI the shell hosts in its 插件 section (Phase 8C). */
-  readonly SettingsCard?: ComponentType
+  /** Optional settings UI the shell hosts on the companion's 插件 sub-page. */
+  readonly SettingsCard?: ComponentType<PluginSettingsCardProps>
+  readonly configStore?: DesktopCompanionConfigStore
   init(ctx: DesktopCompanionContext): (() => void) | void
 }
 

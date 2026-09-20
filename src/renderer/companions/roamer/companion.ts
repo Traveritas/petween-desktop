@@ -15,7 +15,6 @@
  * window hidden (rAF stops — settle immediately), session teardown, and
  * options polled every 3s (stats-hud pullOptions pattern — no remount).
  */
-import type { ComponentType } from 'react'
 import type {
   PetweenClientService,
   PositionDriver,
@@ -55,7 +54,7 @@ export function createRoamerCompanion(): DesktopCompanion {
     displayName: '自主行为（游荡 / 待机 / 捣乱）',
     description:
       '闲时宠物自己在桌面上游荡（可配成永远）；后续批次加入待机小动作与捣乱行为。纯视觉行为，不抢鼠标、不影响点击穿透。',
-    SettingsCard: RoamerCard as ComponentType,
+    SettingsCard: RoamerCard,
     init({ petween }: DesktopCompanionContext) {
       let disposed = false
       let options = normalizeRoamerOptions(undefined)

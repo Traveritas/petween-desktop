@@ -1,19 +1,19 @@
 /**
- * stats-hud/settings-card.tsx — the 插件 section card for the stats bubble
- * HUD. Owns nothing but the DOM controls: it reads the option bag the shell
- * stores under companions.options['stats-hud'] and PUTs patches back through
- * /api/petween-desktop/settings (the same transport every other settings
- * control uses — no companion-specific endpoints).
+ * stats-hud/settings-card.tsx — the 插件 sub-page card for the stats bubble
+ * HUD. A CONTROLLED component (Phase 18 settings rework): the shell page
+ * owns the draft under companions.options['stats-hud'] and its 取消/应用 bar
+ * does all persistence — this file owns nothing but DOM controls.
  *
  * Layout: behaviour toggles, then one row per bubble TYPE (思考/编辑/回复/
  * 完成) with its own style / enter / exit / hold picks — legacy flat keys
  * are migrated on read (migrateTypeConfigs) so old picks keep their look.
  */
-import { useEffect, useState, type CSSProperties } from 'react'
+import { type CSSProperties } from 'react'
+import type { PluginSettingsCardProps } from '../registry'
 import { listBubbleStyles } from '../bubbles/styles'
 import { listBubbleEnterAnimations, listBubbleExitAnimations } from '../bubbles/animations'
 import { DEFAULT_HUD_OPTIONS } from './hud-logic'
-import { migrateTypeConfigs, STATS_HUD_ID, type BubbleTypeKey } from './companion'
+import { migrateTypeConfigs, type BubbleTypeKey } from './companion'
 
 interface OptionBag {
   types?: Partial<Record<BubbleTypeKey, Record<string, unknown>>>
@@ -30,47 +30,21 @@ interface OptionBag {
 const TYPE_LABELS: Record<BubbleTypeKey, string> = { thinking: '思考', edit: '编辑', reply: '回复', turn: '完成' }
 const TYPE_ORDER: BubbleTypeKey[] = ['thinking', 'edit', 'reply', 'turn']
 
-export function StatsHudCard(): JSX.Element {
-  const [bag, setBag] = useState<OptionBag | null>(null)
-  const [types, setTypes] = useState(() => migrateTypeConfigs(undefined))
+export function StatsHudCard(props: PluginSettingsCardProps): JSX.Element {
+  const bag: OptionBag =
+    typeof props.value === 'object' && props.value !== null ? (props.value as OptionBag) : {}
+  // Legacy flat keys migrate on every read — a pure transform, cheap enough
+  // per render and identical to what the overlay's options poll applies.
+  const types = migrateTypeConfigs(bag)
 
-  useEffect(() => {
-    let alive = true
-    void fetch('/api/petween-desktop/settings')
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: { settings?: { companions?: { options?: Record<string, unknown> } } } | null) => {
-        if (!alive || body === null) return
-        const raw = body.settings?.companions?.options?.[STATS_HUD_ID]
-        const next = typeof raw === 'object' && raw !== null ? (raw as OptionBag) : {}
-        setBag(next)
-        setTypes(migrateTypeConfigs(next))
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  const patch = (next: OptionBag): void => {
-    // Side effects stay OUT of the setState updater (StrictMode double-invokes
-    // updaters — a fetch inside one would fire twice): merge against the
-    // latest committed bag, then set + PUT.
-    const merged = { ...(bag ?? {}), ...next }
-    setBag(merged)
-    setTypes(migrateTypeConfigs(merged))
-    void fetch('/api/petween-desktop/settings', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ companions: { options: { [STATS_HUD_ID]: merged } } }),
-    }).catch(() => {})
+  const patch = (next: Partial<OptionBag>): void => {
+    props.onChange({ ...bag, ...next })
   }
 
   const patchType = (type: BubbleTypeKey, field: string, value: unknown): void => {
-    const currentType = (bag?.types?.[type] as Record<string, unknown> | undefined) ?? {}
-    patch({ types: { ...(bag?.types ?? {}), [type]: { ...currentType, [field]: value } } })
+    const currentType = (bag.types?.[type] as Record<string, unknown> | undefined) ?? {}
+    patch({ types: { ...(bag.types ?? {}), [type]: { ...currentType, [field]: value } } })
   }
-
-  if (bag === null) return <p className="rowHint">加载中…</p>
 
   const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0', flexWrap: 'wrap' }
   const selectStyle: CSSProperties = { flex: '0 0 auto' }

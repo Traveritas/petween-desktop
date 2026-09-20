@@ -696,3 +696,45 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 ### 后置项（backlog）
 
 - 便签/拉窗位置避让（当前随机带不避任务栏/宠物本体）；拉窗可交互化（穿透协议三处扩展）；姿势覆盖的上传入口 UI（当前仅 options 直写，批 3 卡片已有内容池上传、行为姿势上传未做卡片控件）；走路朝向（需上游开 pose 镜像缝，回流项）；多显示器游走（overlay 仅主屏的既有约束）；便签文本池与拉窗池分离。
+
+## Phase 18：设置窗重构——插件分页 + 每页 取消/应用（2026-09-21 代码完成；真机验收待用户）
+
+用户两项拍板：①插件分类挪到导航最底部、点击展开各插件子页、每插件独立页面（设置内容**始终展示**，可先配置后启用）；②保存模型统一为 Windows 属性对话框式 取消/应用（**每页独立**草稿与底栏，切页有脏警告：留下 / 丢弃更改并离开 / 保存并离开）。
+
+### 背景：原保存通路盘点（重构动机）
+
+原四条通路行为不一致：壳层 `useSettings`（乐观应用 + 300ms 防抖 PUT + 重试，但无保存状态显示）；roamer/stats-hud 卡各自 fetch + 即时 PUT 且 **fire-and-forget（失败静默丢失）**；physics 卡自带防抖 PUT + 保存态显示（三卡中最完善但孤岛）；宠物编辑器 iframe 自有草稿模型（不动）。**没有任何通路等关窗才保存**——用户感知的「不舒服」实为缺提交边界/无保存反馈/静默丢失三件事，本重构一并解决。
+
+### 架构
+
+- **每页草稿**（`usePageDraft`）：页挂载时 load 自己的切片（5 次退避重试 + 失败态重试按钮）→ baseline + draft；改动只进 draft；应用 = PUT 切片（服务端深合并）并采纳服务端归一化结果为新 baseline；取消 = 回滚 baseline；dirty = `jsonDeepEqual`（`src/renderer/settings/draft.ts` 纯函数）。
+- **导航守卫**：活跃页经 `PageApi`（onDirtyChange / registerApply）向 App 登记脏状态与 apply 句柄；脏页切换导航弹底部守卫条（保存并离开失败则留守，页内底栏显示错误）。
+- **插件分页**：导航底部可展开「插件」组，每 companion 一个子页 = 启用开关（始终可配）+ 受控 SettingsCard（错误边界隔离：单卡崩溃只坏本页）。禁用插件仍在子导航（可重新启用）。
+- **受控卡契约**（registry.ts）：`SettingsCard?: ComponentType<PluginSettingsCardProps>`（`{value, onChange}` 纯控制，卡内零网络）；`configStore?` 可选自有存储（physics：GET/PUT `/api/petween-physics/config`，同 hub 路由，overlay 侧传播故事不变；应用顺序 = 先存自有包再 PUT settings，验证拒绝先暴露、重试幂等）。
+- **例外**：宠物页 iframe 保留 petween 编辑器自己的草稿+显式保存（本就是「显式应用」语义）；通用页无草稿项（自启即时生效，注明不经过「应用」）。
+- 关窗 = hide：未应用草稿随窗口驻留内存，仅退出应用才丢（已知取舍，未做脏关窗确认）。
+
+### 上游（petween-physics `760fb37`）
+
+- PhysicsCard 可选受控模式：传 `value/onChange` 即纯控制（无 hub 读写/无防抖/无保存态行），不传保持 DSH 自治卡逐字节不变；§12 共享配置横幅在受控下经 onChange 合并（四组嵌套逐字段合并，镜像 store.update 语义）；恢复默认经 onChange。**4 个新受控用例，上游 194 全绿。**
+- desktop 入口：`PluginSettingsCardProps` 结构镜像 + `configStore`（fetch 同源路由）。
+
+### 测试（413 → 420，+7）
+
+`tests/renderer/draft.test.ts`（node，4 用例：jsonDeepEqual 原始值/结构/数组/嵌套差异）；`tests/renderer/controlled-cards.test.tsx`（jsdom，3 用例：roamer/stats-hud 受控契约——渲染 value、经 onChange 报全包、**挂载零 fetch** 防自治保存回潮）。vitest include 扩到 `.test.tsx`。构建链（electron-vite build）验证设置窗 bundle 正常产出。
+
+### 待用户真机验收清单
+
+1. 导航：连接/宠物/交互/通用在顶部，插件组在最底部；点击展开三插件子项；子页各自独立。
+2. 任意页改动 → 底栏亮「有未保存的更改」，取消回滚、应用落盘（overlay/托盘侧 3s 轮询内生效）；干净时按钮禁用。
+3. 脏页切导航 → 守卫条三选项：留下（不动）/丢弃更改并离开/保存并离开（失败留守并显示错误）。
+4. 插件子页：禁用状态下设置内容仍可见可改；启用开关随「应用」生效（关闭即时卸载）。
+5. physics 页：改重力等参数 → 应用 → 拖甩手感随新配置（该页应用走 physics 自有路由）；「恢复默认」进草稿、点应用才落盘。
+6. roamer/stats-hud 页改动随应用生效（3s 轮询热更新）；stats-hud 四类型样式选择等进草稿。
+7. 连接页：连接器启用/跟随开关进草稿（应用后宠物联动启停）；安装/移除 hooks 与端口测试仍即时。
+8. 关窗再开（hide→show）未应用草稿仍在；完全退出才丢弃。
+9. 单卡崩溃隔离（可选用坏数据制造）不影响其他页。
+
+### 后置项（backlog）
+
+- 脏关窗确认（当前 hide 驻留即保留）；连接器 enable 的 hint 与实际延迟语义复查；roamer 卡密集行重排为正规 row 布局（借独立页空间，in-tree 无上游负担）；设置窗整体 e2e（Playwright 线）。

@@ -13,3 +13,4 @@ registerCompanion(createStatsHudCompanion())
 registerCompanion(createRoamerCompanion())
 
 export { listCompanions, mountEnabledCompanions } from './registry'
+export type { DesktopCompanion } from './registry'

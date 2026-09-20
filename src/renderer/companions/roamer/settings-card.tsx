@@ -1,18 +1,16 @@
 /**
- * roamer/settings-card.tsx — the 插件 section card for the autonomous-
- * behavior companion. Owns nothing but DOM controls: reads the option bag
- * the shell stores under companions.options['roamer'] and PUTs merged bags
- * back through /api/pween-desktop/settings (the transport every other
- * settings control uses). Batch 1 ships the wander section; idle-action
- * and mischief sections land with their engine batches (2/3) — toggles
- * only appear once they do something.
- *
- * Same discipline as StatsHudCard: no props, fetch on mount, side effects
- * never inside setState updaters (StrictMode double-invokes them).
+ * roamer/settings-card.tsx — the 插件 sub-page card for the autonomous-
+ * behavior companion. A CONTROLLED component (Phase 18 settings rework): the
+ * shell page owns the draft under companions.options['roamer'] and its
+ * 取消/应用 bar does all persistence — this file owns nothing but DOM
+ * controls. It renders `value` and reports full-bag edits through
+ * `onChange`; the only side effect left is the image upload action (asset
+ * creation), whose resulting pool entry still flows back through onChange.
  */
-import { useEffect, useState, type CSSProperties } from 'react'
+import { type CSSProperties } from 'react'
+import type { PluginSettingsCardProps } from '../registry'
 import { DEFAULT_IDLE, DEFAULT_MISCHIEF, DEFAULT_WANDER } from './options'
-import { ROAMER_ID, type IdleActionId, type MischiefActionId, type RoamerContentItem } from './types'
+import { type IdleActionId, type MischiefActionId, type RoamerContentItem } from './types'
 
 interface OptionBag {
   wander?: {
@@ -54,79 +52,32 @@ const MISCHIEF_ACTION_LABELS: Record<MischiefActionId, string> = {
 }
 const MISCHIEF_ACTION_ORDER: MischiefActionId[] = ['pullWindow', 'stickyNote', 'dashAcross', 'edgePeek']
 
-export function RoamerCard(): JSX.Element {
-  const [bag, setBag] = useState<OptionBag | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    void fetch('/api/petween-desktop/settings')
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: { settings?: { companions?: { options?: Record<string, unknown> } } } | null) => {
-        if (!alive || body === null) return
-        const raw = body.settings?.companions?.options?.[ROAMER_ID]
-        setBag(typeof raw === 'object' && raw !== null ? (raw as OptionBag) : {})
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [])
+export function RoamerCard(props: PluginSettingsCardProps): JSX.Element {
+  const bag: OptionBag =
+    typeof props.value === 'object' && props.value !== null ? (props.value as OptionBag) : {}
 
   const patchWander = (field: string, value: unknown): void => {
-    const merged: OptionBag = {
-      ...(bag ?? {}),
-      wander: { ...(bag?.wander ?? {}), [field]: value },
-    }
-    setBag(merged)
-    void fetch('/api/petween-desktop/settings', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
-    }).catch(() => {})
+    props.onChange({ ...bag, wander: { ...(bag.wander ?? {}), [field]: value } })
   }
 
   const patchIdle = (field: string, value: unknown): void => {
-    const merged: OptionBag = {
-      ...(bag ?? {}),
-      idle: { ...(bag?.idle ?? {}), [field]: value },
-    }
-    setBag(merged)
-    void fetch('/api/petween-desktop/settings', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
-    }).catch(() => {})
+    props.onChange({ ...bag, idle: { ...(bag.idle ?? {}), [field]: value } })
   }
 
   const patchIdleAction = (action: IdleActionId, value: boolean): void => {
-    patchIdle('actions', { ...(bag?.idle?.actions ?? {}), [action]: value })
+    patchIdle('actions', { ...(bag.idle?.actions ?? {}), [action]: value })
   }
 
   const patchMischief = (field: string, value: unknown): void => {
-    const merged: OptionBag = {
-      ...(bag ?? {}),
-      mischief: { ...(bag?.mischief ?? {}), [field]: value },
-    }
-    setBag(merged)
-    void fetch('/api/petween-desktop/settings', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
-    }).catch(() => {})
+    props.onChange({ ...bag, mischief: { ...(bag.mischief ?? {}), [field]: value } })
   }
 
   const patchMischiefAction = (action: MischiefActionId, value: boolean): void => {
-    patchMischief('actions', { ...(bag?.mischief?.actions ?? {}), [action]: value })
+    patchMischief('actions', { ...(bag.mischief?.actions ?? {}), [action]: value })
   }
 
   const patchPool = (pool: RoamerContentItem[]): void => {
-    const merged: OptionBag = { ...(bag ?? {}), contentPool: pool }
-    setBag(merged)
-    void fetch('/api/petween-desktop/settings', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
-    }).catch(() => {})
+    props.onChange({ ...bag, contentPool: pool })
   }
 
   /** Upload through the petween asset pipeline, then append to the pool. */
@@ -138,7 +89,7 @@ export function RoamerCard(): JSX.Element {
       .then((body) => {
         if (body === null) return
         patchPool([
-          ...(bag?.contentPool ?? []),
+          ...(bag.contentPool ?? []),
           { id: `pool-${body.asset.id}`, kind: 'image', url: body.asset.url },
         ])
       })
@@ -148,10 +99,8 @@ export function RoamerCard(): JSX.Element {
   const addText = (text: string): void => {
     const trimmed = text.trim()
     if (trimmed === '') return
-    patchPool([...(bag?.contentPool ?? []), { id: `pool-text-${Date.now()}`, kind: 'text', text: trimmed }])
+    patchPool([...(bag.contentPool ?? []), { id: `pool-text-${Date.now()}`, kind: 'text', text: trimmed }])
   }
-
-  if (bag === null) return <p className="rowHint">加载中…</p>
 
   const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0', flexWrap: 'wrap' }
   const labelStyle: CSSProperties = { flex: '0 0 3em' }

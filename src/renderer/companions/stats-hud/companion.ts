@@ -12,7 +12,6 @@
  * The whole subtree is pointer-events:none — click-through is not affected.
  * The BubbleHost is the shared singleton (dialogue lives in the same columns).
  */
-import type { ComponentType } from 'react'
 import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import type { StatsSnapshot } from '../../../main/connectors/stats-ledger'
 import { acquireSharedBubbleHost, releaseSharedBubbleHost } from '../bubbles/shared-host'
@@ -134,7 +133,7 @@ export function createStatsHudCompanion(): DesktopCompanion {
     id: STATS_HUD_ID,
     displayName: '统计泡泡（思考 / 编辑行数）',
     description: '思考用时、文件写入行数、回合摘要与模型回复以泡泡形式悬浮在宠物旁（每会话一列）。数据来自 zcode 连接器。',
-    SettingsCard: StatsHudCard as ComponentType,
+    SettingsCard: StatsHudCard,
     init({ petween }: DesktopCompanionContext) {
       let options = normalizeOptions(undefined)
       let disposed = false

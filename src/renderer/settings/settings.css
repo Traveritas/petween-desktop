@@ -61,6 +61,59 @@ body {
 .nav .navLabel { font-weight: 600; }
 .nav .navHint { font-size: 12px; color: var(--muted); }
 
+/* Bottom-pinned 插件 group: core sections stay on top, the extensible tail
+   sits at the nav's foot and expands one sub-item per registered companion. */
+.navSpacer { flex: 1; }
+.pluginNav { display: flex; flex-direction: column; gap: 2px; }
+.navCaret { margin-left: 6px; color: var(--muted); font-size: 11px; }
+.nav .navSub { padding: 7px 12px 7px 26px; }
+.nav .navSub .navLabel { font-weight: 500; font-size: 13px; }
+.navEmpty { margin: 4px 0 0 26px; font-size: 12px; color: var(--muted); }
+
+/* A draftable page: scrolling card body + pinned 取消/应用 bar. */
+.page { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.page .card { flex: 1; overflow-y: auto; margin: 20px auto 12px; }
+.draftBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(760px, calc(100% - 48px));
+  margin: 0 auto 20px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.draftState { font-size: 13px; color: var(--muted); }
+.draftState.error { color: var(--danger); }
+.draftActions { display: flex; gap: 8px; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+button.primary:hover { color: #ffffff; }
+button.primary:disabled { opacity: 0.45; cursor: default; }
+
+/* Leave-dirty guard: bottom overlay shown while a navigation is pending. */
+.navGuard {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--panel);
+  border-top: 2px solid var(--accent);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.18);
+}
+.navGuardText { font-weight: 600; }
+.navGuardActions { display: flex; gap: 8px; }
+
+.pluginCrash { padding: 8px 0; }
+
 .content { flex: 1; min-width: 0; position: relative; }
 
 .card {

@@ -3,18 +3,42 @@
  * /api/petween-desktop/* endpoints — no Electron IPC — so dev (vite proxy)
  * and prod (same-origin local-server) behave identically.
  *
- * Five sections: 连接 (agent state sources; DSH today, connector slots
- * later), 宠物 (the petween editor embedded in a same-origin iframe, kept
- * mounted so a dirty draft survives section switches), 交互 (click-through
- * behavior + rescue), 插件 (companions), 通用 (auto-launch, info).
+ * Phase 18 settings rework:
+ * - Navigation: 连接 / 宠物 / 交互 / 通用 on top, and an expandable 插件 group
+ *   pinned at the BOTTOM with one sub-page per registered companion (each
+ *   page: enable toggle + the companion's controlled SettingsCard, rendered
+ *   even while disabled so it can be configured before enabling).
+ * - Save model: every page owns its own draft of its settings slice plus a
+ *   取消/应用 bar (Windows property-dialog semantics). Edits land in the
+ *   draft only; 应用 PUTs the slice (server merges), 取消 reverts to the
+ *   last applied baseline. Leaving a dirty page asks first
+ *   (留下 / 丢弃更改并离开 / 保存并离开). Closing the window only hides it,
+ *   so an unapplied draft survives until the app quits.
+ * - The 宠物 section is the exception: the embedded petween editor keeps its
+ *   own draft + explicit save (it stays mounted across section switches).
+ * - Companions with a configStore (petween-physics) keep their persisted
+ *   config OUTSIDE the settings document; their page loads/saves the bag
+ *   through that store — same route the self-managed card used, so the
+ *   overlay-side propagation story is unchanged.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { DesktopSettings } from '../../main/desktop-settings'
-import { listCompanions } from '../companions'
+import { listCompanions, type DesktopCompanion } from '../companions'
+import { jsonDeepEqual } from './draft'
 import './settings.css'
 
-type Section = 'connect' | 'pet' | 'pointer' | 'plugins' | 'general'
+/** A page id: a top section or `plugin:<companion id>`. */
+type PageId = 'connect' | 'pet' | 'pointer' | 'general' | `plugin:${string}`
+
+const TOP_SECTIONS: Array<{ id: PageId; label: string; hint: string }> = [
+  { id: 'connect', label: '连接', hint: 'Agent 状态源' },
+  { id: 'pet', label: '宠物', hint: '姿势 / 动画 / 预设' },
+  { id: 'pointer', label: '交互', hint: '点击穿透与命中' },
+  { id: 'general', label: '通用', hint: '启动与信息' },
+]
+
+type ConnectorUserSettings = DesktopSettings['connectors']['zcode']
 
 interface StatusResponse {
   dsh: { enabled: boolean; connected: boolean; detail?: string }
@@ -22,14 +46,6 @@ interface StatusResponse {
   dataRoot: string
   serverOrigin: string
 }
-
-const SECTIONS: Array<{ id: Section; label: string; hint: string }> = [
-  { id: 'connect', label: '连接', hint: 'Agent 状态源' },
-  { id: 'pet', label: '宠物', hint: '姿势 / 动画 / 预设' },
-  { id: 'pointer', label: '交互', hint: '点击穿透与命中' },
-  { id: 'plugins', label: '插件', hint: '伴生行为模块' },
-  { id: 'general', label: '通用', hint: '启动与信息' },
-]
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -51,150 +67,200 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-function useSettings(): {
-  settings: DesktopSettings | null
-  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']>; companions: Partial<DesktopSettings['companions']>; connectors: { zcode?: Partial<DesktopSettings['connectors']['zcode']>; cc?: Partial<DesktopSettings['connectors']['cc']>; codex?: Partial<DesktopSettings['connectors']['codex']> } }>) => void
-} {
-  const [settings, setSettings] = useState<DesktopSettings | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pending = useRef<Record<string, unknown>>({})
-  const latest = useRef<DesktopSettings | null>(null)
-  const flushSeq = useRef(0)
-  latest.current = settings
+async function getSettings(): Promise<DesktopSettings> {
+  const body = await api<{ settings: DesktopSettings }>('/api/petween-desktop/settings')
+  return body.settings
+}
+
+/** PUT a partial settings document; the server deep-merges per group/id. */
+async function putSettings(patch: Record<string, unknown>): Promise<DesktopSettings> {
+  const body = await api<{ settings: DesktopSettings }>('/api/petween-desktop/settings', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  return body.settings
+}
+
+/** The handle a page registers with the App for the leave-dirty guard. */
+interface PageApi {
+  onDirtyChange(dirty: boolean): void
+  registerApply(apply: (() => Promise<boolean>) | null): void
+}
+
+interface PageDraft<T> {
+  draft: T | null
+  dirty: boolean
+  saving: boolean
+  error: string | null
+  set(next: T): void
+  revert(): void
+  apply(): Promise<boolean>
+  retryLoad(): void
+}
+
+/**
+ * One page's draft lifecycle: load (with backoff retry) → baseline + draft;
+ * edits only touch the draft; apply() commits through the caller's sink and
+ * adopts the server-normalized result as the new baseline.
+ */
+function usePageDraft<T>(options: {
+  load: () => Promise<T>
+  /** Commits the draft; resolves to the fresh baseline (server-normalized). */
+  apply: (draft: T) => Promise<T>
+  api: PageApi
+}): PageDraft<T> {
+  const optionsRef = useRef(options)
+  optionsRef.current = options
+  const [baseline, setBaseline] = useState<T | null>(null)
+  const baselineRef = useRef<T | null>(null)
+  baselineRef.current = baseline
+  const [draft, setDraft] = useState<T | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [reloadSeq, setReloadSeq] = useState(0)
 
   useEffect(() => {
     let alive = true
     let attempt = 0
-    const load = (): void => {
-      void api<{ settings: DesktopSettings }>('/api/petween-desktop/settings').then(
-        (body) => {
-          if (alive) setSettings(body.settings)
+    const run = (): void => {
+      void optionsRef.current.load().then(
+        (value) => {
+          if (!alive) return
+          setBaseline(value)
+          setDraft(structuredClone(value))
+          setError(null)
         },
-        (error) => {
-          // retry with backoff — a stuck "加载设置…" page helps nobody
+        (loadError: unknown) => {
+          if (!alive) return
           attempt += 1
-          if (alive && attempt < 5) setTimeout(load, 500 * attempt)
-          else console.error('petween-desktop: settings load failed', error)
+          // A stuck "加载中…" page helps nobody — retry with backoff, then
+          // surface the reason in the draft bar (with a 重试 button).
+          if (attempt < 5) {
+            setTimeout(run, 500 * attempt)
+            return
+          }
+          setError(loadError instanceof Error ? loadError.message : String(loadError))
         },
       )
     }
-    load()
+    run()
     return () => {
       alive = false
-      if (timer.current !== null) clearTimeout(timer.current)
     }
+  }, [reloadSeq])
+
+  const set = useCallback((next: T): void => setDraft(next), [])
+
+  const revert = useCallback((): void => {
+    if (baselineRef.current !== null) setDraft(structuredClone(baselineRef.current))
   }, [])
 
-  const patch = useCallback((next: Record<string, unknown>) => {
-    pending.current = { ...pending.current, ...next }
-    // optimistic local apply so controls feel instant
-    const optimistic = pending.current as {
-      clickThrough?: Partial<DesktopSettings['clickThrough']>
-      dsh?: Partial<DesktopSettings['dsh']>
-      companions?: Partial<DesktopSettings['companions']>
-      connectors?: {
-        zcode?: Partial<DesktopSettings['connectors']['zcode']>
-        cc?: Partial<DesktopSettings['connectors']['cc']>
-        codex?: Partial<DesktopSettings['connectors']['codex']>
-      }
+  const apply = useCallback(async (): Promise<boolean> => {
+    if (draft === null || saving) return false
+    setSaving(true)
+    setError(null)
+    try {
+      const fresh = await optionsRef.current.apply(draft)
+      setBaseline(fresh)
+      setDraft(structuredClone(fresh))
+      return true
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : String(applyError))
+      return false
+    } finally {
+      setSaving(false)
     }
-    if (latest.current !== null) {
-      setSettings({
-        ...latest.current,
-        clickThrough: { ...latest.current.clickThrough, ...optimistic.clickThrough },
-        dsh: { ...latest.current.dsh, ...optimistic.dsh },
-        companions: { ...latest.current.companions, ...optimistic.companions },
-        connectors: {
-          zcode: { ...latest.current.connectors.zcode, ...optimistic.connectors?.zcode },
-          cc: { ...latest.current.connectors.cc, ...optimistic.connectors?.cc },
-          codex: { ...latest.current.connectors.codex, ...optimistic.connectors?.codex },
-        },
-      })
-    }
-    if (timer.current !== null) clearTimeout(timer.current)
-    timer.current = setTimeout(() => {
-      timer.current = null // release the slot so a failed flush's retry guard can fire
-      const body = pending.current
-      pending.current = {}
-      sendPatch(body, 1)
-    }, 300)
-  }, [])
+  }, [draft, saving])
 
-  /** PUT a patch; stale responses never apply, failures re-queue and retry. */
-  const sendPatch = (body: Record<string, unknown>, attempt: number): void => {
-    flushSeq.current += 1
-    const seq = flushSeq.current
-    void api<{ settings: DesktopSettings }>('/api/petween-desktop/settings', {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }).then(
-      (result) => {
-        if (seq !== flushSeq.current) return
-        // Merge any edits that landed while this flush was in flight — the
-        // raw server response doesn't know about them and would visually
-        // roll the toggles back for up to the 300ms debounce + RTT.
-        const queued = pending.current as Partial<{
-          clickThrough: Partial<DesktopSettings['clickThrough']>
-          dsh: Partial<DesktopSettings['dsh']>
-          companions: Partial<DesktopSettings['companions']>
-          connectors: {
-            zcode?: Partial<DesktopSettings['connectors']['zcode']>
-            cc?: Partial<DesktopSettings['connectors']['cc']>
-            codex?: Partial<DesktopSettings['connectors']['codex']>
-          }
-        }>
-        setSettings({
-          ...result.settings,
-          clickThrough: { ...result.settings.clickThrough, ...queued.clickThrough },
-          dsh: { ...result.settings.dsh, ...queued.dsh },
-          companions: { ...result.settings.companions, ...queued.companions },
-          connectors: {
-            zcode: { ...result.settings.connectors.zcode, ...queued.connectors?.zcode },
-            cc: { ...result.settings.connectors.cc, ...queued.connectors?.cc },
-            codex: { ...result.settings.connectors.codex, ...queued.connectors?.codex },
-          },
-        })
-      },
-      (error) => {
-        console.error(`petween-desktop: settings save failed (attempt ${attempt})`, error)
-        if (attempt >= 3) return // drop after 3 tries; next user edit re-queues
-        // re-queue the failed patch under any newer pending edits
-        pending.current = { ...body, ...pending.current }
-        if (timer.current === null) {
-          timer.current = setTimeout(() => {
-            timer.current = null
-            const retry = pending.current
-            pending.current = {}
-            sendPatch(retry, attempt + 1)
-          }, 1000 * attempt)
-        }
-      },
-    )
-  }
+  const dirty = draft !== null && baseline !== null && !jsonDeepEqual(draft, baseline)
 
-  return { settings, patch }
+  useEffect(() => {
+    optionsRef.current.api.onDirtyChange(dirty)
+  }, [dirty])
+
+  useEffect(() => {
+    const { registerApply } = optionsRef.current.api
+    registerApply(apply)
+    return () => registerApply(null)
+  }, [apply])
+
+  return { draft, dirty, saving, error, set, revert, apply, retryLoad: () => setReloadSeq((n) => n + 1) }
 }
 
-function useStatus(): StatusResponse | null {
-  const [status, setStatus] = useState<StatusResponse | null>(null)
-  useEffect(() => {
-    let alive = true
-    const tick = (): void => {
-      void api<StatusResponse>('/api/petween-desktop/status').then(
-        (body) => {
-          if (alive) setStatus(body)
-        },
-        () => {},
-      )
-    }
-    tick()
-    const timer = setInterval(tick, 3000)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [])
-  return status
+function DraftBar(props: {
+  dirty: boolean
+  saving: boolean
+  error: string | null
+  loadFailed: boolean
+  onApply: () => void
+  onRevert: () => void
+  onRetry: () => void
+}): JSX.Element {
+  const state = props.loadFailed
+    ? `加载失败：${props.error ?? '未知错误'}`
+    : props.saving
+      ? '正在保存…'
+      : props.error !== null
+        ? `保存失败：${props.error}`
+        : props.dirty
+          ? '有未保存的更改'
+          : '更改将在点击「应用」后生效'
+  return (
+    <div className="draftBar">
+      <span className={`draftState ${props.error !== null ? 'error' : ''}`}>{state}</span>
+      {props.loadFailed ? (
+        <button type="button" onClick={props.onRetry}>
+          重试
+        </button>
+      ) : (
+        <span className="draftActions">
+          <button type="button" disabled={!props.dirty || props.saving} onClick={props.onRevert}>
+            取消
+          </button>
+          <button type="button" className="primary" disabled={!props.dirty || props.saving} onClick={props.onApply}>
+            应用
+          </button>
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The shell every draftable page renders into: card + draft bar. Children
+ * only mount once the slice has loaded, so their hooks see a real draft.
+ */
+function SettingsPage<T>(props: {
+  title: string
+  hint?: string
+  load: () => Promise<T>
+  apply: (draft: T) => Promise<T>
+  api: PageApi
+  children: (draft: T, set: (next: T) => void) => ReactNode
+}): JSX.Element {
+  const page = usePageDraft<T>({ load: props.load, apply: props.apply, api: props.api })
+  return (
+    <div className="page">
+      <section className="card">
+        <h2>{props.title}</h2>
+        {props.hint !== undefined && <p className="sectionHint">{props.hint}</p>}
+        {page.draft === null ? (
+          <p className="sectionHint">{page.error !== null ? '该页设置未能加载。' : '加载中…'}</p>
+        ) : (
+          props.children(page.draft, page.set)
+        )}
+      </section>
+      <DraftBar
+        dirty={page.dirty}
+        saving={page.saving}
+        error={page.error}
+        loadFailed={page.draft === null && page.error !== null}
+        onApply={() => void page.apply()}
+        onRevert={page.revert}
+        onRetry={page.retryLoad}
+      />
+    </div>
+  )
 }
 
 function Toggle(props: { checked: boolean; onChange: (next: boolean) => void; label: string; hint?: string }): JSX.Element {
@@ -242,11 +308,32 @@ const CONNECTOR_TITLES: Record<'zcode' | 'cc' | 'codex', string> = {
   codex: 'Codex',
 }
 
+function useStatus(): StatusResponse | null {
+  const [status, setStatus] = useState<StatusResponse | null>(null)
+  useEffect(() => {
+    let alive = true
+    const tick = (): void => {
+      void api<StatusResponse>('/api/petween-desktop/status').then(
+        (body) => {
+          if (alive) setStatus(body)
+        },
+        () => {},
+      )
+    }
+    tick()
+    const timer = setInterval(tick, 3000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [])
+  return status
+}
+
 function HookConnectorCard(props: {
-  settings: DesktopSettings
-  patch: ReturnType<typeof useSettings>['patch']
-  /** The settings group, URL slug and display name in one. */
   slug: 'zcode' | 'cc' | 'codex'
+  connector: ConnectorUserSettings
+  patch: (partial: Partial<ConnectorUserSettings>) => void
   /** Install-row copy: where the merge write goes + how it takes effect. */
   installHint: string
   installedHint: string
@@ -259,8 +346,7 @@ function HookConnectorCard(props: {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  const { slug } = props
-  const connector = props.settings.connectors[slug]
+  const { slug, connector } = props
   const enabled = connector.enabled
 
   useEffect(() => {
@@ -323,15 +409,15 @@ function HookConnectorCard(props: {
       </div>
       <Toggle
         label={`启用 ${CONNECTOR_TITLES[slug]} 连接器`}
-        hint="接收 hooks 事件并驱动宠物状态（关闭后为纯监听不联动）"
+        hint="接收 hooks 事件并驱动宠物状态（关闭后为纯监听不联动）；改动随页面底部的「应用」生效"
         checked={enabled}
-        onChange={(next) => props.patch({ connectors: { [slug]: { enabled: next } } })}
+        onChange={(next) => props.patch({ enabled: next })}
       />
       <Toggle
         label="只跟随最近交互的会话"
         hint="多会话时宠物只联动你最近提交过提示（或新开/恢复）的会话；后台会话不打扰表情"
         checked={connector.followLatestUser}
-        onChange={(next) => props.patch({ connectors: { [slug]: { followLatestUser: next } } })}
+        onChange={(next) => props.patch({ followLatestUser: next })}
       />
       <div className="row">
         <span className="rowText">
@@ -354,10 +440,45 @@ function HookConnectorCard(props: {
   )
 }
 
-function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<typeof useSettings>['patch']; status: StatusResponse | null }): JSX.Element {
-  const [portDraft, setPortDraft] = useState(String(props.settings.dsh.port))
+interface ConnectSlice {
+  dsh: DesktopSettings['dsh']
+  connectors: DesktopSettings['connectors']
+}
+
+function ConnectPage(props: { api: PageApi; status: StatusResponse | null }): JSX.Element {
+  return (
+    <SettingsPage<ConnectSlice>
+      title="Agent 状态源"
+      hint="宠物根据已连接的 Agent 工具的会话状态切换表情；全部关闭时为纯桌宠模式（只有待机动画）。"
+      load={async () => {
+        const settings = await getSettings()
+        return { dsh: settings.dsh, connectors: settings.connectors }
+      }}
+      apply={async (draft) => {
+        const settings = await putSettings({ dsh: draft.dsh, connectors: draft.connectors })
+        return { dsh: settings.dsh, connectors: settings.connectors }
+      }}
+      api={props.api}
+    >
+      {(draft, set) => <ConnectBody slice={draft} set={set} status={props.status} />}
+    </SettingsPage>
+  )
+}
+
+function ConnectBody(props: {
+  slice: ConnectSlice
+  set: (next: ConnectSlice) => void
+  status: StatusResponse | null
+}): JSX.Element {
+  const [portDraft, setPortDraft] = useState(String(props.slice.dsh.port))
   const [probe, setProbe] = useState<string | null>(null)
   const dsh = props.status?.dsh
+  const patchConnector = (slug: 'zcode' | 'cc' | 'codex', partial: Partial<ConnectorUserSettings>): void => {
+    props.set({
+      ...props.slice,
+      connectors: { ...props.slice.connectors, [slug]: { ...props.slice.connectors[slug], ...partial } },
+    })
+  }
 
   const testPort = (): void => {
     setProbe('探测中…')
@@ -371,10 +492,7 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
   }
 
   return (
-    <section className="card">
-      <h2>Agent 状态源</h2>
-      <p className="sectionHint">宠物根据已连接的 Agent 工具的会话状态切换表情；全部关闭时为纯桌宠模式（只有待机动画）。</p>
-
+    <>
       <div className="connector">
         <div className="connectorHead">
           <span className={`dot ${dsh?.connected ? 'on' : ''}`} />
@@ -385,9 +503,9 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         </div>
         <Toggle
           label="启用 DSH 桥"
-          hint="关闭后宠物不联动 DSH（纯桌宠）"
-          checked={props.settings.dsh.enabled}
-          onChange={(next) => props.patch({ dsh: { enabled: next } })}
+          hint="关闭后宠物不联动 DSH（纯桌宠）；改动随页面底部的「应用」生效"
+          checked={props.slice.dsh.enabled}
+          onChange={(next) => props.set({ ...props.slice, dsh: { ...props.slice.dsh, enabled: next } })}
         />
         <div className="row">
           <span className="rowText">
@@ -404,10 +522,10 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
               onChange={(event) => setPortDraft(event.target.value)}
               onBlur={() => {
                 const port = Number.parseInt(portDraft, 10)
-                if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== props.settings.dsh.port) {
-                  props.patch({ dsh: { port } })
+                if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== props.slice.dsh.port) {
+                  props.set({ ...props.slice, dsh: { ...props.slice.dsh, port } })
                 } else {
-                  setPortDraft(String(props.settings.dsh.port))
+                  setPortDraft(String(props.slice.dsh.port))
                 }
               }}
             />
@@ -420,9 +538,9 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
       </div>
 
       <HookConnectorCard
-        settings={props.settings}
-        patch={props.patch}
         slug="zcode"
+        connector={props.slice.connectors.zcode}
+        patch={(partial) => patchConnector('zcode', partial)}
         installHint="向 ~/.zcode/cli/config.json 合并写入 hook 注册；安装后需重启 zcode 客户端生效"
         installedHint="从 zcode 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
         idleNote="（尚无事件——若刚安装，请重启 zcode 客户端）"
@@ -430,9 +548,9 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
       />
 
       <HookConnectorCard
-        settings={props.settings}
-        patch={props.patch}
         slug="cc"
+        connector={props.slice.connectors.cc}
+        patch={(partial) => patchConnector('cc', partial)}
         installHint="向 ~/.claude/settings.json 合并写入 hook 注册；CC 会热加载，无需重启即生效"
         installedHint="从 Claude Code 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
         idleNote="（尚无事件——CC 会热加载 settings.json，新会话即生效）"
@@ -440,9 +558,9 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
       />
 
       <HookConnectorCard
-        settings={props.settings}
-        patch={props.patch}
         slug="codex"
+        connector={props.slice.connectors.codex}
+        patch={(partial) => patchConnector('codex', partial)}
         installHint="向 ~/.codex/hooks.json 合并写入 hook 注册（需要系统 Node.js）；Codex 会请求一次信任确认（hooks 哈希校验）"
         installedHint="从 Codex 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
         idleNote="（尚无事件——若刚安装，请在 Codex 里确认信任新增 hooks 后开启新会话）"
@@ -457,17 +575,29 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         </div>
         <p className="sectionHint">opencode 等将按同一连接器架构加入（docs/06/07/08）。</p>
       </div>
-    </section>
+    </>
   )
 }
 
-function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<typeof useSettings>['patch'] }): JSX.Element {
-  const ct = props.settings.clickThrough
+function PointerPage(props: { api: PageApi }): JSX.Element {
   return (
-    <section className="card">
-      <h2>点击穿透</h2>
-      <p className="sectionHint">默认自动：只有宠物本体响应鼠标，其余区域完全放行。异常时可切换强制模式或用救援热键。</p>
+    <SettingsPage<DesktopSettings['clickThrough']>
+      title="点击穿透"
+      hint="默认自动：只有宠物本体响应鼠标，其余区域完全放行。异常时可切换强制模式或用救援热键。"
+      load={async () => (await getSettings()).clickThrough}
+      apply={async (draft) => (await putSettings({ clickThrough: draft })).clickThrough}
+      api={props.api}
+    >
+      {(draft, set) => <PointerBody ct={draft} set={set} />}
+    </SettingsPage>
+  )
+}
 
+function PointerBody(props: { ct: DesktopSettings['clickThrough']; set: (next: DesktopSettings['clickThrough']) => void }): JSX.Element {
+  const { ct } = props
+  const patch = (partial: Partial<DesktopSettings['clickThrough']>): void => props.set({ ...ct, ...partial })
+  return (
+    <>
       <div className="modePicker">
         {(
           [
@@ -476,12 +606,7 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
           ] as const
         ).map(([value, label, hint]) => (
           <label key={value} className={`mode ${ct.mode === value ? 'active' : ''}`}>
-            <input
-              type="radio"
-              name="ct-mode"
-              checked={ct.mode === value}
-              onChange={() => props.patch({ clickThrough: { mode: value } })}
-            />
+            <input type="radio" name="ct-mode" checked={ct.mode === value} onChange={() => patch({ mode: value })} />
             <span className="rowLabel">{label}</span>
             <span className="rowHint">{hint}</span>
           </label>
@@ -498,7 +623,7 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
           min={0}
           max={24}
           value={ct.hitPaddingPx}
-          onChange={(event) => props.patch({ clickThrough: { hitPaddingPx: Number(event.target.value) } })}
+          onChange={(event) => patch({ hitPaddingPx: Number(event.target.value) })}
         />
       </div>
 
@@ -506,19 +631,19 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         label="鼠标移动转发"
         hint="仅在宠物附近启用（约 96px 内）；关闭则全程只用光标轮询。转发用系统级鼠标钩子，已知的其他窗口光标闪烁问题只在钩子常驻时出现"
         checked={ct.forwardMouseMoves}
-        onChange={(next) => props.patch({ clickThrough: { forwardMouseMoves: next } })}
+        onChange={(next) => patch({ forwardMouseMoves: next })}
       />
       <Toggle
         label="自愈"
         hint="睡眠恢复 / 崩溃 / 拖动后自动重新应用穿透状态"
         checked={ct.selfHealing}
-        onChange={(next) => props.patch({ clickThrough: { selfHealing: next } })}
+        onChange={(next) => patch({ selfHealing: next })}
       />
       <Toggle
         label="救援热键"
         hint="按下在「锁定可交互 / 恢复自动」间切换（自动选用可用组合，默认 Ctrl+Alt+P）"
         checked={ct.rescueHotkeyEnabled}
-        onChange={(next) => props.patch({ clickThrough: { rescueHotkeyEnabled: next } })}
+        onChange={(next) => patch({ rescueHotkeyEnabled: next })}
       />
 
       <div className="row">
@@ -535,39 +660,113 @@ function PointerSection(props: { settings: DesktopSettings; patch: ReturnType<ty
           执行
         </button>
       </div>
-    </section>
+    </>
   )
 }
 
-function PluginsSection(props: { settings: DesktopSettings; patch: ReturnType<typeof useSettings>['patch'] }): JSX.Element {
-  const companions = listCompanions()
+/** Crash isolation for a companion's settings card: one bad page ≠ dead app. */
+class PluginCardBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.error('[petween-desktop] companion settings card crashed', error)
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <div className="pluginCrash">
+          <p className="sectionHint">此插件的设置界面出错了（不影响插件本身的运行）。</p>
+          <button type="button" onClick={() => this.setState({ failed: false })}>
+            重试
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+interface PluginSlice {
+  enabled: boolean
+  bag: unknown
+}
+
+function PluginPage(props: { companion: DesktopCompanion; api: PageApi }): JSX.Element {
+  const { companion } = props
   return (
-    <section className="card">
-      <h2>插件</h2>
-      <p className="sectionHint">伴生行为模块（运行在宠物旁，如投掷物理）。关闭即时生效，重新开启后立即挂载。</p>
-      {companions.length === 0 && <p className="sectionHint">当前构建中没有注册任何插件。</p>}
-      {companions.map((companion) => {
-        const enabled = props.settings.companions.enabled[companion.id] !== false
-        const Card = companion.SettingsCard
-        return (
-          <div key={companion.id} className="companionBlock">
-            <Toggle
-              label={companion.displayName}
-              hint={companion.description ?? companion.id}
-              checked={enabled}
-              onChange={(next) =>
-                props.patch({ companions: { enabled: { ...props.settings.companions.enabled, [companion.id]: next } } })
-              }
-            />
-            {enabled && Card !== undefined && (
-              <div className="companionCard">
-                <Card />
-              </div>
-            )}
+    <SettingsPage<PluginSlice>
+      title={companion.displayName}
+      hint={companion.description ?? companion.id}
+      load={async () => {
+        const settings = await getSettings()
+        // A configStore companion keeps its bag OUT of the settings document.
+        const bag =
+          companion.configStore !== undefined
+            ? await companion.configStore.load()
+            : (settings.companions.options[companion.id] ?? {})
+        return { enabled: settings.companions.enabled[companion.id] !== false, bag }
+      }}
+      apply={async (draft) => {
+        // Own-store bag first: it is the sink most likely to reject
+        // (validation), and a retry after a settings failure is idempotent.
+        if (companion.configStore !== undefined) await companion.configStore.save(draft.bag)
+        const settings = await putSettings({
+          companions: {
+            enabled: { [companion.id]: draft.enabled },
+            ...(companion.configStore === undefined ? { options: { [companion.id]: draft.bag } } : {}),
+          },
+        })
+        return {
+          enabled: settings.companions.enabled[companion.id] !== false,
+          bag: companion.configStore !== undefined ? draft.bag : (settings.companions.options[companion.id] ?? {}),
+        }
+      }}
+      api={props.api}
+    >
+      {(draft, set) => (
+        <PluginBody
+          companion={companion}
+          enabled={draft.enabled}
+          bag={draft.bag}
+          onEnabled={(enabled) => set({ ...draft, enabled })}
+          onBag={(bag) => set({ ...draft, bag })}
+        />
+      )}
+    </SettingsPage>
+  )
+}
+
+function PluginBody(props: {
+  companion: DesktopCompanion
+  enabled: boolean
+  bag: unknown
+  onEnabled: (enabled: boolean) => void
+  onBag: (bag: unknown) => void
+}): JSX.Element {
+  const Card = props.companion.SettingsCard
+  return (
+    <>
+      <Toggle
+        label="启用此插件"
+        hint="关闭即时卸载（宠物侧行为立即停止），重新开启后立即挂载；改动随页面底部的「应用」生效"
+        checked={props.enabled}
+        onChange={props.onEnabled}
+      />
+      {Card !== undefined && (
+        <PluginCardBoundary>
+          {/* Settings stay visible while disabled — configure first, enable
+              later; the shell owns persistence, the card is a pure control. */}
+          <div className="companionCard">
+            <Card value={props.bag} onChange={props.onBag} />
           </div>
-        )
-      })}
-    </section>
+        </PluginCardBoundary>
+      )}
+    </>
   )
 }
 
@@ -580,33 +779,88 @@ function GeneralSection(props: { status: StatusResponse | null }): JSX.Element {
     )
   }, [])
   return (
-    <section className="card">
-      <h2>通用</h2>
-      {autoLaunch !== null && (
-        <Toggle
-          label="开机自启"
-          hint="与托盘菜单中的开关是同一项"
-          checked={autoLaunch}
-          onChange={(next) => {
-            setAutoLaunch(next)
-            void api('/api/petween-desktop/autolaunch', { method: 'PUT', body: JSON.stringify({ enabled: next }) }).catch(() => {})
-          }}
-        />
-      )}
-      <dl className="infoList">
-        <dt>版本</dt>
-        <dd>{props.status?.appVersion ?? '…'}</dd>
-        <dt>数据目录</dt>
-        <dd className="path">{props.status?.dataRoot ?? '…'}</dd>
-      </dl>
-    </section>
+    <div className="page">
+      <section className="card">
+        <h2>通用</h2>
+        {autoLaunch !== null && (
+          <Toggle
+            label="开机自启"
+            hint="与托盘菜单中的开关是同一项（立即生效，不经过「应用」）"
+            checked={autoLaunch}
+            onChange={(next) => {
+              setAutoLaunch(next)
+              void api('/api/petween-desktop/autolaunch', { method: 'PUT', body: JSON.stringify({ enabled: next }) }).catch(() => {})
+            }}
+          />
+        )}
+        <dl className="infoList">
+          <dt>版本</dt>
+          <dd>{props.status?.appVersion ?? '…'}</dd>
+          <dt>数据目录</dt>
+          <dd className="path">{props.status?.dataRoot ?? '…'}</dd>
+        </dl>
+      </section>
+    </div>
   )
 }
 
 function App(): JSX.Element {
-  const { settings, patch } = useSettings()
+  const [companions] = useState(() => listCompanions())
   const status = useStatus()
-  const [active, setActive] = useState<Section>('connect')
+  const [active, setActive] = useState<PageId>('connect')
+  const [pluginNavOpen, setPluginNavOpen] = useState(false)
+  // The active page reports its draft state; navigation through a dirty page
+  // goes through the guard overlay instead of switching directly.
+  const [dirty, setDirty] = useState(false)
+  const [pendingNav, setPendingNav] = useState<PageId | null>(null)
+  const [guardSaving, setGuardSaving] = useState(false)
+  const applyRef = useRef<(() => Promise<boolean>) | null>(null)
+
+  const pageApi: PageApi = {
+    onDirtyChange: setDirty,
+    registerApply: (apply) => {
+      applyRef.current = apply
+    },
+  }
+
+  // Keep the ref stable for pages that inline it in their load/apply options
+  // (usePageDraft reads everything through optionsRef anyway).
+  const apiRef = useRef(pageApi)
+  apiRef.current = pageApi
+
+  const navigate = (target: PageId): void => {
+    if (target === active) return
+    if (dirty) setPendingNav(target)
+    else setActive(target)
+  }
+
+  const confirmDiscard = (): void => {
+    if (pendingNav === null) return
+    const target = pendingNav
+    setDirty(false)
+    setPendingNav(null)
+    setActive(target)
+  }
+
+  const confirmSaveAndLeave = async (): Promise<void> => {
+    if (pendingNav === null) return
+    const target = pendingNav
+    const apply = applyRef.current
+    if (apply === null) {
+      setPendingNav(null)
+      setActive(target)
+      return
+    }
+    setGuardSaving(true)
+    const ok = await apply()
+    setGuardSaving(false)
+    if (!ok) {
+      setPendingNav(null) // stay here; the page's own bar shows the error
+      return
+    }
+    setPendingNav(null)
+    setActive(target)
+  }
 
   // Phase 11: open the standalone animator window (main-side capability;
   // failure is surfaced in the console — the window itself is the feedback).
@@ -616,24 +870,52 @@ function App(): JSX.Element {
     )
   }
 
-  if (settings === null) {
-    return <div className="loading">加载设置…</div>
-  }
+  const activePluginId = active.startsWith('plugin:') ? active.slice('plugin:'.length) : null
 
   return (
     <div className="shell">
       <nav className="nav">
-        {SECTIONS.map((section) => (
+        {TOP_SECTIONS.map((section) => (
           <button
             key={section.id}
             type="button"
             className={active === section.id ? 'active' : ''}
-            onClick={() => setActive(section.id)}
+            onClick={() => navigate(section.id)}
           >
             <span className="navLabel">{section.label}</span>
             <span className="navHint">{section.hint}</span>
           </button>
         ))}
+        <div className="navSpacer" />
+        <div className="pluginNav">
+          <button
+            type="button"
+            className={`navGroup ${activePluginId !== null ? 'active' : ''}`}
+            onClick={() => setPluginNavOpen((open) => !open)}
+          >
+            <span className="navLabel">
+              插件<span className="navCaret">{pluginNavOpen ? '▾' : '▸'}</span>
+            </span>
+            <span className="navHint">伴生行为模块</span>
+          </button>
+          {pluginNavOpen &&
+            companions.map((companion) => {
+              const id: PageId = `plugin:${companion.id}`
+              return (
+                <button
+                  key={companion.id}
+                  type="button"
+                  className={`navSub ${active === id ? 'active' : ''}`}
+                  onClick={() => navigate(id)}
+                >
+                  <span className="navLabel">{companion.displayName}</span>
+                </button>
+              )
+            })}
+          {pluginNavOpen && companions.length === 0 && (
+            <p className="navEmpty">当前构建中没有注册任何插件。</p>
+          )}
+        </div>
       </nav>
       <main className="content">
         {/* The pet section stays mounted (visibility toggling) so the embedded
@@ -649,10 +931,31 @@ function App(): JSX.Element {
             <iframe className="editorFrame" title="Petween 编辑器" src={`${status.serverOrigin}/petween-editor/`} />
           )}
         </div>
-        {active === 'connect' && <ConnectSection settings={settings} patch={patch} status={status} />}
-        {active === 'pointer' && <PointerSection settings={settings} patch={patch} />}
-        {active === 'plugins' && <PluginsSection settings={settings} patch={patch} />}
+        {active === 'connect' && <ConnectPage api={apiRef.current} status={status} />}
+        {active === 'pointer' && <PointerPage api={apiRef.current} />}
+        {activePluginId !== null &&
+          (() => {
+            const companion = companions.find((c) => c.id === activePluginId)
+            if (companion === undefined) return <div className="loading">未知插件：{activePluginId}</div>
+            return <PluginPage key={companion.id} companion={companion} api={apiRef.current} />
+          })()}
         {active === 'general' && <GeneralSection status={status} />}
+        {pendingNav !== null && (
+          <div className="navGuard">
+            <span className="navGuardText">当前页面有未保存的更改</span>
+            <span className="navGuardActions">
+              <button type="button" onClick={() => setPendingNav(null)} disabled={guardSaving}>
+                留下
+              </button>
+              <button type="button" onClick={confirmDiscard} disabled={guardSaving}>
+                丢弃更改并离开
+              </button>
+              <button type="button" className="primary" onClick={() => void confirmSaveAndLeave()} disabled={guardSaving}>
+                {guardSaving ? '保存中…' : '保存并离开'}
+              </button>
+            </span>
+          </div>
+        )}
       </main>
     </div>
   )
