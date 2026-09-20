@@ -586,13 +586,15 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 4. **cc-routes**：`/api/petween-desktop/connector/cc/event|status|install|uninstall`；stdin JSON 解析（prompt_id→turnId）；1MB 上限/session 白名单/永远 204。
 5. **接线**：desktop-settings `connectors.cc`（enabled/followLatestUser 默认开/关，分组隔离有测试）；index.ts 镜像 zcode 块；设置卡 `HookConnectorCard` 泛型化双实例（CC 文案注明无需重启）。
 
-### 验收（待用户）
+### 验收（✅ 2026-09-20 用户确认「现在没问题了」）
 
-- [ ] 设置→连接→Claude Code「安装 hooks」→ 状态点亮；**无需重启 CC**，新会话即联动
-- [ ] 猫在工作（编辑/命令/其他工具分别对上表情）→ 思考 → 等待授权（PermissionRequest/Notification）→ 成功 60s 衰减
-- [ ] 泡泡：思考计时/编辑行数（CC 的 Edit/Write/MultiEdit 形状）/完成摘要/回复文本（v0.5.1 解绑后 CC 也点亮）全链路
-- [ ] 会话结束（SessionEnd）宠物立即收泡回待机；CC 崩溃 30min 惰性 dispose 兜底
-- [ ] 卸载 hooks：settings.json 恢复（外来 hooks/env 完整）
+- [x] 设置→连接→Claude Code「安装 hooks」→ 状态点亮；**无需重启 CC**，新会话即联动
+- [x] 猫在工作（编辑/命令/其他工具分别对上表情）→ 思考 → 等待授权（PermissionRequest；Notification 已在 v0.6.3 摘除——其「等待输入」闲置提示曾把 success 脸污染成等待脸）→ 成功 60s 衰减
+- [x] 泡泡：思考计时/编辑行数（CC 的 Edit/Write/MultiEdit 形状）/完成摘要/回复文本（v0.5.1 解绑后 CC 也点亮）全链路（dialogue 端点 turnId 匹配返回经 `claude -p` 实弹验证）
+- [x] 会话结束（SessionEnd）宠物立即收泡回待机；CC 崩溃 30min 惰性 dispose 兜底
+- [x] 卸载 hooks：settings.json 恢复（外来 hooks/env 完整）
+
+验收过程追加修复：v0.6.1（dev 代理 origin 重写 + 连接器 disable 接线 reset()）、v0.6.3（Notification 污染摘除）。
 
 ### 后置项
 
@@ -612,12 +614,14 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 - **对话泡泡零成本点亮**：rollout 的 `task_complete` 事件直接带 `turn_id` + `last_agent_message`——dialogue 源流式留最后一个非空条目即可（Phase 15 的解绑在此兑现）。
 - 编辑行数：apply_patch 走 line-count 的 patch 分支，CC 形状 Edit/Write 兜底。
 
-### 验收（待用户，与 Phase 15 一并）
+### 验收（✅ 2026-09-20 用户确认「现在没问题了」）
 
-- [ ] 设置→连接→Codex「安装 hooks」→ Codex 内确认一次信任 → 新会话联动
-- [ ] 表情全链路（thinking/working×3 类/waiting/stop 衰减/打断立即 idle/SessionEnd 收泡）
-- [ ] 泡泡四件套（对话泡泡 task_complete 直取）
-- [ ] 卸载恢复（deja-vu hooks 完整）
+- [x] 设置→连接→Codex「安装 hooks」→ 信任确认（v0.6.4 后可由预铸哈希跳过，见 docs/08 §3.1）→ 新会话联动
+- [x] 表情全链路（thinking/working×3 类/waiting/stop 衰减/打断立即 idle/SessionEnd 收泡）——exec 模式实弹验证全序列送达后用户交互模式确认
+- [x] 泡泡四件套（对话泡泡 task_complete 直取）
+- [x] 卸载恢复（deja-vu hooks 完整——v0.6.2 取证时实测其条目原样保留）
+
+验收过程追加修复（整个侦探链详见 AGENTS v0.6.2~v0.6.4 行）：v0.6.2（Rust regex 无前瞻→路由侧分类 + 超时钳位写 3）、v0.6.4（curl 在 Codex hook 执行器下 stdin+网络必死→node sink 传输 + 重装堆积归属修复）。Codex exec 模式的 Stop 事件 hook 对任何命令失败（回合收尾拆机竞态，Codex 侧问题）记录于 docs/08 §6 观察项。
 
 ### 后置项
 
