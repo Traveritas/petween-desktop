@@ -123,6 +123,24 @@ describe('watchdogs', () => {
     vi.advanceTimersByTime(1_800_000)
     expect(emissions.some((e) => e.method === 'disposed' && e.sessionId === SESSION)).toBe(true)
   })
+
+  it('reset() drops every live session WITH dispose emissions — the disable semantics', () => {
+    const OTHER = 'cc_99999999-8888-7777-6666-555555555555'
+    const { emissions, deps } = setup()
+    const connector = createCcConnector({ ...deps, isFollowEnabled: () => true })
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
+    connector.handle({ kind: 'user-prompt-submit', sessionId: OTHER })
+    connector.handle({ kind: 'stop', sessionId: SESSION })
+    emissions.length = 0
+
+    connector.reset()
+    // Both sessions released immediately — no waiting for watchdogs.
+    expect(emissions.filter((e) => e.method === 'disposed').map((e) => e.sessionId).sort()).toEqual([SESSION, OTHER])
+    expect(connector.status().followTarget).toBeNull()
+    // Timers died with the sessions: no post-reset emissions ever.
+    vi.advanceTimersByTime(3_600_000)
+    expect(emissions).toHaveLength(2)
+  })
 })
 
 describe('follow mode', () => {

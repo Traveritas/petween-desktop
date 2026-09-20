@@ -122,6 +122,16 @@ describe('event sink', () => {
     expect(onHookEvent).not.toHaveBeenCalled()
   })
 
+  it('a same-origin Origin passes the fence (the dev proxy speaks as the target origin)', async () => {
+    const res = await fetch(`${base}${EVENT}?e=stop`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: 'cc_x' }),
+      headers: { origin: base }, // Origin host === Host — exactly what the vite proxy now presents
+    })
+    expect(res.status).toBe(204)
+    expect(onHookEvent).toHaveBeenCalledWith({ kind: 'stop', sessionId: 'cc_x', payload: {} })
+  })
+
   it('rejects non-POST on the sink', async () => {
     const res = await fetch(base + EVENT)
     expect(res.status).toBe(405)

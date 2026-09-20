@@ -58,7 +58,7 @@ ipcMain.on('set-ignore-mouse-events', (e, ignore, opts) =>
 - CSP 注意：`connect-src` **不会**自动放行 localhost 不同端口，要显式列；同源 `'self'` 即覆盖。
 - **绝不关 `webSecurity`**。
 - asar：Electron 给 fs 打了补丁，main 里的 http server 从 asar 内 serve 静态文件开箱即用。
-- dev 模式（见 02 号文档 §1）：electron-vite dev server + `server.proxy` 代理 `/api/petween`、`/api/petween-desktop`、`/api/petween-physics`、`/petween-assets` 到 main 的 local-server（dev 固定端口，changeOrigin: true 满足 Host 白名单），保同源 + HMR。
+- dev 模式（见 02 号文档 §1）：electron-vite dev server + `server.proxy` 代理 `/api/petween`、`/api/petween-desktop`、`/api/petween-physics`、`/petween-assets` 到 main 的 local-server（dev 固定端口；changeOrigin: true + headers.origin 重写为目标源——只改 Host 不改 Origin 会让 Origin↔Host 写栅栏在 dev 全部 403，v0.6.1 真机反馈修），保同源 + HMR。
 
 ## 4. 生命周期与系统集成
 

@@ -60,13 +60,16 @@ export default defineConfig({
     },
     server: {
       proxy: {
-        // changeOrigin: the local server enforces an exact Host whitelist
-        // (routes-host, DNS-rebinding fence) — without it the proxied
-        // requests would still carry the dev-server Host and 403.
-        '/api/petween': { target: localServerTarget, changeOrigin: true },
-        '/api/petween-desktop': { target: localServerTarget, changeOrigin: true },
-        '/api/petween-physics': { target: localServerTarget, changeOrigin: true },
-        '/petween-assets': { target: localServerTarget, changeOrigin: true },
+        // changeOrigin + origin rewrite: the local server enforces an exact
+        // Host whitelist (routes-host, DNS-rebinding fence) AND an Origin↔Host
+        // write fence (route-helpers). changeOrigin alone rewrites Host but
+        // leaves the browser's Origin (localhost:5173) — every proxied PUT/
+        // POST 403ed (real-machine report). The proxy speaks as the target's
+        // own origin so both fences see a coherent same-origin request.
+        '/api/petween': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
+        '/api/petween-desktop': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
+        '/api/petween-physics': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
+        '/petween-assets': { target: localServerTarget, changeOrigin: true, headers: { origin: localServerTarget } },
       },
     },
     build: {

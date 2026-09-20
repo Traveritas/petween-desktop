@@ -92,6 +92,7 @@ export interface ZcodeConnectorDeps {
 export interface ZcodeConnector {
   handle(input: ZcodeHookInput): void
   status(): ZcodeConnectorStatus
+  reset(): void
   dispose(): void
 }
 

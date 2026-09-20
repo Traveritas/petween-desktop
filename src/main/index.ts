@@ -433,13 +433,28 @@ async function bootstrap(): Promise<void> {
 
   // Live-apply settings: click-through options + rescue hotkey + bridge.
   let prevZcodeEnabled = settings.connectors.zcode.enabled
+  let prevCcEnabled = settings.connectors.cc.enabled
+  let prevCodexEnabled = settings.connectors.codex.enabled
   settingsStore.onChange((next) => {
     pointerThrough?.updateOptions(pointerOptions(next))
     syncRescueHotkey(next)
     bridgeRestart?.(next)
+    // Connector enable flips: disable drops every live session WITH the
+    // dispose emissions (the pet releases the agent immediately instead of
+    // wearing its last face until a watchdog); enable re-syncs the cfg files
+    // (skipped at boot when the connector was off).
     const zcodeNext = next.connectors.zcode.enabled
     if (zcodeNext && !prevZcodeEnabled) void syncZcodeCfgFiles()
+    if (!zcodeNext && prevZcodeEnabled) zcodeConnector.reset()
     prevZcodeEnabled = zcodeNext
+    const ccNext = next.connectors.cc.enabled
+    if (ccNext && !prevCcEnabled) void syncCcCfgFiles()
+    if (!ccNext && prevCcEnabled) ccConnector.reset()
+    prevCcEnabled = ccNext
+    const codexNext = next.connectors.codex.enabled
+    if (codexNext && !prevCodexEnabled) void syncCodexCfgFiles()
+    if (!codexNext && prevCodexEnabled) codexConnector.reset()
+    prevCodexEnabled = codexNext
   })
 
   const overlay = createOverlayWindow()

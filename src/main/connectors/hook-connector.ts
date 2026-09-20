@@ -87,6 +87,13 @@ export interface HookConnectorDeps<K extends string> {
 export interface HookConnector<K extends string> {
   handle(input: { kind: K; sessionId: string; payload?: HookPayload }): void
   status(): HookConnectorStatus<K>
+  /**
+   * Drop every live session WITH the dispose emissions — the disable-in-
+   * settings semantics: the pet must release the agent's sessions and the
+   * ledger rows immediately, not when a watchdog eventually fires. (Plain
+   * dispose() stays silent: at app quit nobody is listening anymore.)
+   */
+  reset(): void
   dispose(): void
 }
 
@@ -239,6 +246,14 @@ export function createHookConnector<K extends string>(
     },
 
     status: () => ({ ...status }),
+
+    reset() {
+      for (const [sessionId, state] of sessions) {
+        clearTimers(state)
+        disposeSession(sessionId)
+      }
+      status.followTarget = null
+    },
 
     dispose() {
       for (const state of sessions.values()) clearTimers(state)
