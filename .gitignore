@@ -10,3 +10,4 @@ coverage/
 
 # impeccable review artifacts
 .impeccable/
+.zcode/

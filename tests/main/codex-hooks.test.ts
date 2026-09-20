@@ -4,10 +4,10 @@
  * merge-install / precise-uninstall contract (deja-vu style foreign hooks
  * survive untouched; corrupt files are never clobbered).
  */
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildCodexHookEvents,
   classifyCodexToolKind,
@@ -109,6 +109,11 @@ describe('findNodePath', () => {
     const dir = await mkdtemp(join(tmpdir(), 'petween-cxnode-'))
     try {
       await writeFile(join(dir, 'node.exe'), '', 'utf8')
+      // Hermetic: stub the known install roots away — GitHub's windows
+      // runners ship a Program Files nodejs that the preference would
+      // otherwise grab ahead of the PATH entry under test (CI catch #1).
+      vi.stubEnv('ProgramFiles', join(dir, 'no-such-pf'))
+      vi.stubEnv('ProgramFiles(x86)', join(dir, 'no-such-pf-x86'))
       const found = findNodePath(`C:\\definitely-not-here;${dir}`)
       expect(found).not.toBeNull()
       expect(found!.replace(/\\/g, '/')).toBe(join(dir, 'node.exe').replace(/\\/g, '/'))
@@ -116,7 +121,28 @@ describe('findNodePath', () => {
       expect(findNodePath('')).toBeNull()
       expect(findNodePath('C:\\definitely-not-here')).toBeNull()
     } finally {
+      vi.unstubAllEnvs()
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('prefers a known install root over PATH order (hardening from v0.7.2)', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'petween-cxnode-'))
+    try {
+      const pf = join(base, 'pf')
+      const nodejs = join(pf, 'nodejs')
+      const pathDir = join(base, 'onpath')
+      await mkdir(nodejs, { recursive: true })
+      await mkdir(pathDir, { recursive: true })
+      await writeFile(join(nodejs, 'node.exe'), '', 'utf8')
+      await writeFile(join(pathDir, 'node.exe'), '', 'utf8')
+      vi.stubEnv('ProgramFiles', pf)
+      vi.stubEnv('ProgramFiles(x86)', join(base, 'no-such-pf-x86'))
+      const found = findNodePath(pathDir) // PATH only has the OTHER copy
+      expect(found!.replace(/\\/g, '/')).toBe(join(nodejs, 'node.exe').replace(/\\/g, '/'))
+    } finally {
+      vi.unstubAllEnvs()
+      await rm(base, { recursive: true, force: true })
     }
   })
 })
