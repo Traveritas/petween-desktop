@@ -12,7 +12,8 @@
  * denied lease ('lease-denied') simply reschedules the next attempt.
  */
 import type { StageSnapshot } from 'petween/client/extension-service'
-import type { RoamerCommand, RoamerEvent, RoamerOptions, WanderLegPlan } from './types'
+import { IDLE_ACTION_DURATIONS_MS } from './animations'
+import type { IdleActionId, RoamerCommand, RoamerEvent, RoamerOptions, WanderLegPlan } from './types'
 
 /** Quiet period after the pet first becomes usable — never wander instantly on boot. */
 const INITIAL_DELAY_MS = 6000
@@ -40,7 +41,14 @@ interface WalkingMode {
   startedAt: number
 }
 
-type EngineMode = { kind: 'rest' } | WalkingMode
+interface IdleActionMode {
+  kind: 'idle-action'
+  action: IdleActionId
+  startedAt: number
+  durationMs: number
+}
+
+type EngineMode = { kind: 'rest' } | WalkingMode | IdleActionMode
 
 export interface RoamerEngine {
   apply(event: RoamerEvent): RoamerCommand[]
@@ -50,10 +58,13 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
   const random = deps.random ?? Math.random
   let snapshot: StageSnapshot | null = null
   let mode: EngineMode = { kind: 'rest' }
+  /** True between drag start/end events — closes the race where ticks land before the snapshot's dragging flag flips. */
+  let userDragging = false
   /** True once a usable stage snapshot armed the initial-delay countdown. */
   let armed = false
   let pendingArm = false
   let nextWanderAt = Number.POSITIVE_INFINITY
+  let nextIdleActionAt = Number.POSITIVE_INFINITY
 
   const between = (min: number, max: number): number => min + (max - min) * random()
 
@@ -61,13 +72,13 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
     between(options.wander.pauseMinMs, options.wander.pauseMaxMs)
 
   /**
-   * Everything that must hold before a NEW leg may start. Mid-walk checks
-   * (should the current leg stop early?) use the same gate minus the
-   * mode check — see endWalkIfGateClosed.
+   * The shared autonomy precondition: a live, usable stage (booted, not
+   * dragged, no reduced motion) and the when-mode visual window (idle-only
+   * = only while the agent is idle; 'always' = any state). Wander and idle
+   * actions both gate on this, then add their own enabled flags.
    */
-  const wanderGateOpen = (options: RoamerOptions): boolean => {
-    if (snapshot === null || !snapshot.started || snapshot.dragging || snapshot.reducedMotion) return false
-    if (!options.wander.enabled) return false
+  const autonomyOpen = (options: RoamerOptions): boolean => {
+    if (userDragging || snapshot === null || !snapshot.started || snapshot.dragging || snapshot.reducedMotion) return false
     if (options.wander.when === 'idle-only' && snapshot.visualState !== 'idle') return false
     return true
   }
@@ -114,6 +125,23 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
     nextWanderAt = now + pauseMs(deps.getOptions())
   }
 
+  /**
+   * Cancel/settle an in-flight idle action. Emits idle-action-end so the
+   * runtime can restore a pose-override flash immediately (an animation
+   * self-finishes, a flash hold would linger past the drag).
+   */
+  const endIdleAction = (commands: RoamerCommand[]): void => {
+    if (mode.kind !== 'idle-action') return
+    mode = { kind: 'rest' }
+    commands.push({ type: 'idle-action-end' })
+  }
+
+  const idleIntervalMs = (options: RoamerOptions): number =>
+    between(options.idle.minIntervalMs, options.idle.maxIntervalMs)
+
+  const enabledIdleActions = (options: RoamerOptions): IdleActionId[] =>
+    (Object.keys(options.idle.actions) as IdleActionId[]).filter((id) => options.idle.actions[id])
+
   return {
     apply(event: RoamerEvent): RoamerCommand[] {
       const commands: RoamerCommand[] = []
@@ -123,9 +151,12 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           if (event.snapshot === null) {
             // Session gone: drop any leg un-committed and re-arm on return.
             endWalk(false, Date.now(), commands)
+            endIdleAction(commands)
             armed = false
             pendingArm = false
+            userDragging = false
             nextWanderAt = Number.POSITIVE_INFINITY
+            nextIdleActionAt = Number.POSITIVE_INFINITY
             break
           }
           if (!armed && event.snapshot.started) {
@@ -133,6 +164,9 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             pendingArm = true
           }
           // Mid-walk world changes end the leg early (settled, committed).
+          // An in-flight idle action deliberately survives a busy flip —
+          // the upstream flash ledger clears the pose on the next
+          // pose-changing target anyway, and the deformation is harmless.
           if (mode.kind === 'walking' && walkShouldYield(deps.getOptions())) {
             endWalk(true, Date.now(), commands)
           }
@@ -143,6 +177,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           if (pendingArm) {
             pendingArm = false
             nextWanderAt = event.now + INITIAL_DELAY_MS
+            nextIdleActionAt = event.now + idleIntervalMs(options)
           }
           if (!armed) break
           if (mode.kind === 'walking') {
@@ -152,10 +187,30 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             if (event.now > deadline) endWalk(false, event.now, commands)
             break
           }
-          if (wanderGateOpen(options) && event.now >= nextWanderAt) {
+          if (mode.kind === 'idle-action') {
+            if (event.now >= mode.startedAt + mode.durationMs) {
+              // Completed: reschedule, then fall through — a due wander may
+              // start on this same tick.
+              mode = { kind: 'rest' }
+              nextIdleActionAt = event.now + idleIntervalMs(options)
+            } else {
+              break
+            }
+          }
+          if (autonomyOpen(options) && options.wander.enabled && event.now >= nextWanderAt) {
             const leg = planLeg(options)
             mode = { kind: 'walking', leg, startedAt: event.now }
             commands.push({ type: 'wander-start', ...leg })
+          } else if (autonomyOpen(options) && options.idle.enabled && event.now >= nextIdleActionAt) {
+            const enabled = enabledIdleActions(options)
+            if (enabled.length === 0) {
+              nextIdleActionAt = Number.POSITIVE_INFINITY
+            } else {
+              const action = enabled[Math.floor(random() * enabled.length)]
+              const durationMs = IDLE_ACTION_DURATIONS_MS[action]
+              mode = { kind: 'idle-action', action, startedAt: event.now, durationMs }
+              commands.push({ type: 'idle-action-start', action, durationMs })
+            }
           }
           break
         }
@@ -171,18 +226,27 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           break
         }
         case 'drag': {
+          userDragging = event.phase === 'start'
           if (event.phase === 'start') {
-            // The user's hand outranks the walk; the drag's own end persists.
-            endWalk(false, Date.now(), commands)
+            // The user's hand outranks everything; the drag's own end persists.
+            endWalk(false, event.now, commands)
+            endIdleAction(commands)
           } else {
             // After being handled the pet rests a full pause, not the remainder.
-            if (armed) nextWanderAt = event.now + pauseMs(deps.getOptions())
+            if (armed) {
+              nextWanderAt = event.now + pauseMs(deps.getOptions())
+              nextIdleActionAt = event.now + idleIntervalMs(deps.getOptions())
+            }
           }
           break
         }
         case 'hidden': {
-          // rAF never fires while hidden — settle the leg where it stands.
+          // rAF never fires while hidden — settle the leg where it stands
+          // and cut an in-flight idle action (its flash hold would linger
+          // invisibly past the window's return).
           endWalk(true, event.now, commands)
+          endIdleAction(commands)
+          nextIdleActionAt = event.now + idleIntervalMs(deps.getOptions())
           break
         }
       }

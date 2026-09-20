@@ -11,8 +11,8 @@
  * never inside setState updaters (StrictMode double-invokes them).
  */
 import { useEffect, useState, type CSSProperties } from 'react'
-import { DEFAULT_WANDER } from './options'
-import { ROAMER_ID } from './types'
+import { DEFAULT_IDLE, DEFAULT_WANDER } from './options'
+import { ROAMER_ID, type IdleActionId } from './types'
 
 interface OptionBag {
   wander?: {
@@ -22,8 +22,22 @@ interface OptionBag {
     pauseMinMs?: number
     pauseMaxMs?: number
   }
+  idle?: {
+    enabled?: boolean
+    actions?: Partial<Record<IdleActionId, boolean>>
+    minIntervalMs?: number
+    maxIntervalMs?: number
+  }
   [key: string]: unknown
 }
+
+const IDLE_ACTION_LABELS: Record<IdleActionId, string> = {
+  doze: '打盹',
+  lookAround: '张望',
+  sway: '晃悠',
+  shake: '抖毛',
+}
+const IDLE_ACTION_ORDER: IdleActionId[] = ['doze', 'lookAround', 'sway', 'shake']
 
 export function RoamerCard(): JSX.Element {
   const [bag, setBag] = useState<OptionBag | null>(null)
@@ -56,13 +70,32 @@ export function RoamerCard(): JSX.Element {
     }).catch(() => {})
   }
 
+  const patchIdle = (field: string, value: unknown): void => {
+    const merged: OptionBag = {
+      ...(bag ?? {}),
+      idle: { ...(bag?.idle ?? {}), [field]: value },
+    }
+    setBag(merged)
+    void fetch('/api/petween-desktop/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ companions: { options: { [ROAMER_ID]: merged } } }),
+    }).catch(() => {})
+  }
+
+  const patchIdleAction = (action: IdleActionId, value: boolean): void => {
+    patchIdle('actions', { ...(bag?.idle?.actions ?? {}), [action]: value })
+  }
+
   if (bag === null) return <p className="rowHint">加载中…</p>
 
   const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0', flexWrap: 'wrap' }
   const labelStyle: CSSProperties = { flex: '0 0 3em' }
   const numberStyle: CSSProperties = { width: 76 }
   const wander = bag.wander ?? {}
-  const enabled = wander.enabled ?? DEFAULT_WANDER.enabled
+  const wanderEnabled = wander.enabled ?? DEFAULT_WANDER.enabled
+  const idle = bag.idle ?? {}
+  const idleEnabled = idle.enabled ?? DEFAULT_IDLE.enabled
 
   return (
     <div>
@@ -70,7 +103,7 @@ export function RoamerCard(): JSX.Element {
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input
             type="checkbox"
-            checked={enabled}
+            checked={wanderEnabled}
             onChange={(event) => patchWander('enabled', event.target.checked)}
           />
           <span className="rowHint">游走</span>
@@ -117,7 +150,50 @@ export function RoamerCard(): JSX.Element {
         />
         <span className="rowHint">ms（每段路程之间随机停留）</span>
       </div>
-      <p className="rowHint">仅闲时=无 Agent 会话忙碌时才走；永远=任何状态都走（姿势仍显示工作状态）。拖住宠物会立即让它停下。</p>
+      <div style={rowStyle}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={idleEnabled}
+            onChange={(event) => patchIdle('enabled', event.target.checked)}
+          />
+          <span className="rowHint">待机动作（静止时的小动作）</span>
+        </label>
+        {IDLE_ACTION_ORDER.map((action) => (
+          <label key={action} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={bag.idle?.actions?.[action] ?? DEFAULT_IDLE.actions[action]}
+              onChange={(event) => patchIdleAction(action, event.target.checked)}
+            />
+            <span className="rowHint">{IDLE_ACTION_LABELS[action]}</span>
+          </label>
+        ))}
+      </div>
+      <div style={rowStyle}>
+        <span className="rowHint" style={labelStyle}>间隔</span>
+        <input
+          type="number"
+          min={1000}
+          max={3600000}
+          step={1000}
+          style={numberStyle}
+          value={idle.minIntervalMs ?? DEFAULT_IDLE.minIntervalMs}
+          onChange={(event) => patchIdle('minIntervalMs', Number(event.target.value))}
+        />
+        <span className="rowHint">至</span>
+        <input
+          type="number"
+          min={1000}
+          max={3600000}
+          step={1000}
+          style={numberStyle}
+          value={idle.maxIntervalMs ?? DEFAULT_IDLE.maxIntervalMs}
+          onChange={(event) => patchIdle('maxIntervalMs', Number(event.target.value))}
+        />
+        <span className="rowHint">ms（与游走共用触发时机）</span>
+      </div>
+      <p className="rowHint">仅闲时=无 Agent 会话忙碌时才行动；永远=任何状态都行动（姿势仍显示工作状态）。拖住宠物会立即让它停下。</p>
     </div>
   )
 }

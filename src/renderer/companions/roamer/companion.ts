@@ -25,8 +25,15 @@ import type { TimelineInstance } from 'petween/motion/animation-handle'
 import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import { createRoamerEngine } from './engine'
 import { normalizeRoamerOptions } from './options'
-import { WALK_BOB_ANIMATION_ID } from './animations'
-import { ROAMER_ID, type Point, type RoamerCommand, type RoamerEvent, type WanderLegPlan } from './types'
+import { IDLE_ACTION_ANIMATION_IDS, WALK_BOB_ANIMATION_ID } from './animations'
+import {
+  ROAMER_ID,
+  type IdleActionId,
+  type Point,
+  type RoamerCommand,
+  type RoamerEvent,
+  type WanderLegPlan,
+} from './types'
 import { RoamerCard } from './settings-card'
 
 const SETTINGS_POLL_MS = 3000
@@ -59,6 +66,8 @@ export function createRoamerCompanion(): DesktopCompanion {
       } | null = null
       let walkAnim: TimelineInstance | null = null
       let walkFlashActive = false
+      let idleAnim: TimelineInstance | null = null
+      let idleFlashActive = false
 
       const lerp = (from: number, to: number, t: number): number => from + (to - from) * t
 
@@ -147,9 +156,49 @@ export function createRoamerCompanion(): DesktopCompanion {
         leg = { plan, from, cancelFrame: () => cancelAnimationFrame(handle) }
       }
 
+      const startIdleAction = (action: IdleActionId, durationMs: number): void => {
+        idleAnim = petween.playAnimation(IDLE_ACTION_ANIMATION_IDS[action])
+        // Pose overrides exist for doze/lookAround; sway/shake are motion-only.
+        const override = action === 'doze' || action === 'lookAround' ? options.poses[action] : undefined
+        if (override !== undefined) {
+          idleFlashActive = petween.flashAsset({ url: override }, durationMs + 200)
+        }
+      }
+
+      const endIdleAction = (): void => {
+        if (idleAnim !== null) {
+          try {
+            idleAnim.dispose()
+          } catch {
+            /* the stage may already be gone */
+          }
+          idleAnim = null
+        }
+        if (idleFlashActive) {
+          idleFlashActive = false
+          try {
+            petween.flashPose(snapshot?.poseKey ?? 'idle', POSE_RESTORE_HOLD_MS)
+          } catch {
+            /* the stage may already be gone */
+          }
+        }
+      }
+
       const execute = (command: RoamerCommand): void => {
-        if (command.type === 'wander-start') startWalk(command)
-        else endWalk(command.commit)
+        switch (command.type) {
+          case 'wander-start':
+            startWalk(command)
+            break
+          case 'wander-end':
+            endWalk(command.commit)
+            break
+          case 'idle-action-start':
+            startIdleAction(command.action, command.durationMs)
+            break
+          case 'idle-action-end':
+            endIdleAction()
+            break
+        }
       }
 
       const pump = (event: RoamerEvent): void => {
@@ -191,6 +240,7 @@ export function createRoamerCompanion(): DesktopCompanion {
         document.removeEventListener('visibilitychange', onVisibilityChange)
         unsubscribeStage()
         unsubscribeDrag()
+        endIdleAction()
         endWalk(false)
       }
     },

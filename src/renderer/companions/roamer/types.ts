@@ -104,3 +104,12 @@ export type RoamerCommand =
    * (user grabbed the pet, lease lost, session gone).
    */
   | { type: 'wander-end'; commit: boolean }
+  /**
+   * Play an idle micro-action: the default motion animation plus the
+   * optional pose override for its duration. Occupies the pet (no walk,
+   * no other action) until the engine reports idle-action-end or the
+   * duration elapses (self-completing on a later tick).
+   */
+  | { type: 'idle-action-start'; action: IdleActionId; durationMs: number }
+  /** Cancel/settle an in-flight idle action (restore any active flash). */
+  | { type: 'idle-action-end' }

@@ -8,8 +8,17 @@
 import { describe, expect, it } from 'vitest'
 import type { StageSnapshot } from 'petween/client/extension-service'
 import { createRoamerEngine } from '../../src/renderer/companions/roamer/engine'
-import { DEFAULT_WANDER, normalizeRoamerOptions } from '../../src/renderer/companions/roamer/options'
-import type { RoamerCommand, RoamerWanderOptions } from '../../src/renderer/companions/roamer/types'
+import {
+  DEFAULT_IDLE,
+  DEFAULT_WANDER,
+  normalizeRoamerOptions,
+} from '../../src/renderer/companions/roamer/options'
+import { IDLE_ACTION_DURATIONS_MS } from '../../src/renderer/companions/roamer/animations'
+import type {
+  RoamerCommand,
+  RoamerIdleOptions,
+  RoamerWanderOptions,
+} from '../../src/renderer/companions/roamer/types'
 
 const T0 = 1_000_000
 
@@ -31,9 +40,16 @@ const snap = (overrides: Partial<StageSnapshot> = {}): StageSnapshot => ({
 })
 
 /** Engine with default options and random() => 0.5 unless overridden. */
-const engineWith = (options?: Partial<RoamerWanderOptions>, random: () => number = () => 0.5) => {
-  const merged: RoamerWanderOptions = { ...DEFAULT_WANDER, ...options }
-  return createRoamerEngine({ getOptions: () => normalizeRoamerOptions({ wander: merged }), random })
+const engineWith = (
+  options?: Partial<RoamerWanderOptions>,
+  idle?: Partial<RoamerIdleOptions>,
+  random: () => number = () => 0.5,
+) => {
+  const bag = {
+    wander: { ...DEFAULT_WANDER, ...options },
+    idle: { ...DEFAULT_IDLE, ...idle },
+  }
+  return createRoamerEngine({ getOptions: () => normalizeRoamerOptions(bag), random })
 }
 
 const types = (commands: RoamerCommand[]): string[] => commands.map((command) => command.type)
@@ -108,7 +124,7 @@ describe('wander gates', () => {
   })
 
   it('respects the master toggle, dragging and reduced motion', () => {
-    const disabled = engineWith({ enabled: false })
+    const disabled = engineWith({ enabled: false }, { enabled: false })
     arm(disabled)
     expect(types(disabled.apply({ type: 'tick', now: T0 + 60000 }))).toEqual([])
 
@@ -182,6 +198,89 @@ describe('interruptions', () => {
     const start = walkStartAt(engine, deadline)
     const overdue = deadline + start.durationMs * 1.5 + 1
     expect(engine.apply({ type: 'tick', now: overdue })).toEqual([{ type: 'wander-end', commit: false }])
+  })
+})
+
+describe('idle actions', () => {
+  it('fires a random idle action after the interval when stationary (wander off)', () => {
+    const engine = engineWith({ enabled: false })
+    arm(engine)
+    // interval = 25000 + 0.5 * (70000 - 25000) = 47500
+    expect(types(engine.apply({ type: 'tick', now: T0 + 47499 }))).toEqual([])
+    const commands = engine.apply({ type: 'tick', now: T0 + 47500 })
+    expect(types(commands)).toEqual(['idle-action-start'])
+    // all four enabled, random()=0.5 → index floor(0.5*4)=2 → sway
+    const start = commands[0] as Extract<RoamerCommand, { type: 'idle-action-start' }>
+    expect(start.action).toBe('sway')
+    expect(start.durationMs).toBe(IDLE_ACTION_DURATIONS_MS.sway)
+  })
+
+  it('completes after the duration and reschedules the next interval', () => {
+    const engine = engineWith({ enabled: false }, { minIntervalMs: 1000, maxIntervalMs: 1000 })
+    arm(engine)
+    const start = engine.apply({ type: 'tick', now: T0 + 1000 })[0] as Extract<RoamerCommand, { type: 'idle-action-start' }>
+    const end = T0 + 1000 + start.durationMs
+    expect(types(engine.apply({ type: 'tick', now: end - 1 }))).toEqual([])
+    // completing the action itself emits nothing; the NEXT due fires one interval later
+    expect(types(engine.apply({ type: 'tick', now: end }))).toEqual([])
+    expect(types(engine.apply({ type: 'tick', now: end + 999 }))).toEqual([])
+    expect(types(engine.apply({ type: 'tick', now: end + 1000 }))).toEqual(['idle-action-start'])
+  })
+
+  it('respects the master toggle and the per-action toggles', () => {
+    const disabled = engineWith({ enabled: false }, { enabled: false })
+    arm(disabled)
+    expect(types(disabled.apply({ type: 'tick', now: T0 + 100000 }))).toEqual([])
+
+    const shakeOnly = engineWith(
+      { enabled: false },
+      { actions: { doze: false, lookAround: false, sway: false } },
+    )
+    arm(shakeOnly)
+    const commands = shakeOnly.apply({ type: 'tick', now: T0 + 100000 })
+    expect(types(commands)).toEqual(['idle-action-start'])
+    expect((commands[0] as Extract<RoamerCommand, { type: 'idle-action-start' }>).action).toBe('shake')
+  })
+
+  it('shares the when-mode gate with wander (busy blocks idle-only; always allows)', () => {
+    const idleOnly = engineWith({ enabled: false })
+    arm(idleOnly, snap({ visualState: 'thinking', poseKey: 'thinking' }))
+    expect(types(idleOnly.apply({ type: 'tick', now: T0 + 100000 }))).toEqual([])
+
+    const always = engineWith({ enabled: false, when: 'always' })
+    arm(always, snap({ visualState: 'thinking', poseKey: 'thinking' }))
+    expect(types(always.apply({ type: 'tick', now: T0 + 100000 }))).toEqual(['idle-action-start'])
+  })
+
+  it('does not fire while walking; fires once the leg completed', () => {
+    const engine = engineWith(undefined, { minIntervalMs: 7000, maxIntervalMs: 7000 })
+    const deadline = arm(engine)
+    const start = walkStartAt(engine, deadline)
+    // idle due (T0+7000) falls inside the first leg — suppressed
+    expect(types(engine.apply({ type: 'tick', now: deadline + 500 }))).toEqual([])
+    expect(start.durationMs).toBeGreaterThan(500)
+
+    engine.apply({ type: 'leg-complete', now: deadline + start.durationMs })
+    // wander now waits a pause (9500); the overdue idle fires instead
+    const commands = engine.apply({ type: 'tick', now: deadline + start.durationMs + 1 })
+    expect(types(commands)).toEqual(['idle-action-start'])
+  })
+
+  it('cancels on drag start, hidden and session teardown', () => {
+    const engine = engineWith({ enabled: false }, { minIntervalMs: 1000, maxIntervalMs: 1000 })
+    arm(engine)
+    engine.apply({ type: 'tick', now: T0 + 1000 }) // action in flight
+
+    expect(engine.apply({ type: 'drag', phase: 'start', now: T0 + 1200 })).toEqual([{ type: 'idle-action-end' }])
+    expect(types(engine.apply({ type: 'tick', now: T0 + 1300 }))).toEqual([]) // still in the gesture
+
+    engine.apply({ type: 'drag', phase: 'end', now: T0 + 1400 }) // reschedules to T0+2400
+    expect(types(engine.apply({ type: 'tick', now: T0 + 2399 }))).toEqual([])
+    engine.apply({ type: 'tick', now: T0 + 2400 }) // action #2 in flight
+    expect(engine.apply({ type: 'hidden', now: T0 + 2600 })).toEqual([{ type: 'idle-action-end' }])
+
+    engine.apply({ type: 'tick', now: T0 + 3600 }) // action #3 in flight
+    expect(engine.apply({ type: 'stage', snapshot: null })).toEqual([{ type: 'idle-action-end' }])
   })
 })
 
