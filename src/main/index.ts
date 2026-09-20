@@ -61,6 +61,7 @@ import { getAutoLaunch, setAutoLaunch } from './login-item'
 import { importLegacyData, legacyHomeHasData, targetHomeCanImport } from './legacy-import'
 import { startPetweenLocalServer, type PetweenLocalServer } from './local-server'
 import { assemblePhysics } from './physics-assembly'
+import { assembleRoamer } from './roamer-assembly'
 import { attachPointerThrough, type PointerThroughHandle, type PointerThroughRuntimeOptions } from './pointer-through'
 import { createOverlayWindow, loadOverlayPage } from './overlay-window'
 import { openSettingsWindow } from './settings-window'
@@ -179,6 +180,10 @@ async function bootstrap(): Promise<void> {
     petweenHostService: server.petweenHostService,
     configPath: join(app.getPath('userData'), 'petween-physics', 'config.json'),
   })
+
+  // roamer companion host half (docs/05 Phase 17): default wander
+  // animations into the shared library — no routes, no store.
+  const roamer = assembleRoamer({ petweenHostService: server.petweenHostService })
 
   const legacyRoot = dshHomePath('petween')
 
@@ -499,6 +504,7 @@ async function bootstrap(): Promise<void> {
   app.on('quit', () => {
     if (rescueHotkey !== null) globalShortcut.unregister(rescueHotkey)
     physics.dispose()
+    roamer.dispose()
     zcodeConnector.dispose()
     ccConnector.dispose()
     codexConnector.dispose()
