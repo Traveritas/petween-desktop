@@ -56,6 +56,26 @@ describe('normalizeDesktopSettings', () => {
     expect(normalizeDesktopSettings({ connectors: 'junk' }).connectors.zcode.enabled).toBe(true)
   })
 
+  it('cc connector (Phase 15) mirrors the zcode group and patches stay isolated', async () => {
+    expect(DEFAULT_DESKTOP_SETTINGS.connectors.cc).toEqual({ enabled: true, followLatestUser: false })
+    expect(normalizeDesktopSettings({ connectors: { cc: { enabled: false, followLatestUser: true } } }).connectors.cc).toEqual({
+      enabled: false,
+      followLatestUser: true,
+    })
+    expect(normalizeDesktopSettings({ connectors: { cc: 'junk' } }).connectors.cc.enabled).toBe(true)
+    const dir = await mkdtemp(join(tmpdir(), 'petween-dsettings-'))
+    try {
+      const store = await createDesktopSettingsStore(join(dir, 's.json'))
+      store.update({ connectors: { zcode: { enabled: false } } })
+      // A zcode-only patch must not touch the cc group.
+      const next = store.update({ connectors: { cc: { followLatestUser: true } } })
+      expect(next.connectors.zcode.enabled).toBe(false)
+      expect(next.connectors.cc).toEqual({ enabled: true, followLatestUser: true })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('followLatestUser defaults off and a zcode patch keeps the sibling field', async () => {
     expect(DEFAULT_DESKTOP_SETTINGS.connectors.zcode.followLatestUser).toBe(false)
     const dir = await mkdtemp(join(tmpdir(), 'petween-dsettings-'))

@@ -15,6 +15,15 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { openAnimatorWindow } from './animator-window'
 import { DEV_LOCAL_PORT } from './dev-port'
 import { createZcodeConnector } from './connectors/zcode-connector'
+import { createCcConnector } from './connectors/cc-connector'
+import {
+  installCcHooks,
+  uninstallCcHooks,
+  writeCcHookConfigs,
+  ccHooksInstalled,
+  type CcHooksPaths,
+} from './connectors/cc-hooks'
+import { registerCcConnectorRoutes } from './connectors/cc-routes'
 import { createStatsLedger } from './connectors/stats-ledger'
 import { registerStatsRoutes } from './connectors/stats-routes'
 import { createDialogueSource } from './connectors/dialogue-source'
@@ -281,6 +290,45 @@ async function bootstrap(): Promise<void> {
     },
     uninstallHooks: async () => {
       await uninstallZcodeHooks(zcodePaths)
+    },
+  })
+
+  // Claude Code connector (Phase 15, docs/07): same architecture on the
+  // shared hook-connector engine. CC hot-reloads settings.json, so installs
+  // go live without a client restart (unlike zcode).
+  const ccPaths: CcHooksPaths = {
+    cfgDir: join(app.getPath('userData'), 'cc-hooks'),
+    settingsPath: join(homedir(), '.claude', 'settings.json'),
+  }
+  const ccConnector = createCcConnector({
+    relay: server.relay,
+    now: () => Date.now(),
+    isFollowEnabled: () => settingsStore?.get().connectors.cc.followLatestUser ?? false,
+    stats: statsLedger,
+    log: (message) => console.log(message),
+  })
+  const ccEnabled = (): boolean => settingsStore?.get().connectors.cc.enabled ?? true
+  const syncCcCfgFiles = (): Promise<void> => {
+    if (!ccEnabled() || server === null) return Promise.resolve()
+    return writeCcHookConfigs(ccPaths.cfgDir, server.port).catch((error: unknown) => {
+      console.error('[petween-cc] cfg sync failed', error)
+    })
+  }
+  void syncCcCfgFiles()
+  registerCcConnectorRoutes({ webServer: server.webServer }, {
+    isEnabled: ccEnabled,
+    onHookEvent: (input) => ccConnector.handle(input),
+    connectorStatus: async () => ({
+      ...ccConnector.status(),
+      enabled: ccEnabled(),
+      hooksInstalled: await ccHooksInstalled(ccPaths),
+    }),
+    installHooks: async () => {
+      await syncCcCfgFiles()
+      await installCcHooks(ccPaths)
+    },
+    uninstallHooks: async () => {
+      await uninstallCcHooks(ccPaths)
     },
   })
 

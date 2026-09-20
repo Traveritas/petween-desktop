@@ -40,15 +40,19 @@ export interface DesktopSettings {
     options: Record<string, Record<string, unknown>>
   }
   /**
-   * Agent connectors beyond DSH (docs/06): the zcode hooks listener. `enabled`
-   * gates the event sink only — hook installation into the zcode config is an
-   * explicit user action from the settings card. `followLatestUser` = follow
-   * mode: with several zcode sessions open, the pet tracks only the one the
-   * user last submitted a prompt in (background sessions stay bookkept but
-   * silent).
+   * Agent connectors beyond DSH (docs/06/07): the zcode and Claude Code hooks
+   * listeners. `enabled` gates the event sink only — hook installation into
+   * the CLI config is an explicit user action from the settings card.
+   * `followLatestUser` = follow mode: with several sessions open, the pet
+   * tracks only the one the user last submitted a prompt in (background
+   * sessions stay bookkept but silent).
    */
   connectors: {
     zcode: {
+      enabled: boolean
+      followLatestUser: boolean
+    }
+    cc: {
       enabled: boolean
       followLatestUser: boolean
     }
@@ -73,6 +77,10 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   },
   connectors: {
     zcode: {
+      enabled: true,
+      followLatestUser: false,
+    },
+    cc: {
       enabled: true,
       followLatestUser: false,
     },
@@ -116,6 +124,7 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
   }
   const connectors = (typeof raw.connectors === 'object' && raw.connectors !== null ? raw.connectors : {}) as Record<string, unknown>
   const zcode = (typeof connectors.zcode === 'object' && connectors.zcode !== null ? connectors.zcode : {}) as Record<string, unknown>
+  const cc = (typeof connectors.cc === 'object' && connectors.cc !== null ? connectors.cc : {}) as Record<string, unknown>
   const mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
   return {
     clickThrough: {
@@ -136,6 +145,10 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
       zcode: {
         enabled: typeof zcode.enabled === 'boolean' ? zcode.enabled : true,
         followLatestUser: typeof zcode.followLatestUser === 'boolean' ? zcode.followLatestUser : false,
+      },
+      cc: {
+        enabled: typeof cc.enabled === 'boolean' ? cc.enabled : true,
+        followLatestUser: typeof cc.followLatestUser === 'boolean' ? cc.followLatestUser : false,
       },
     },
   }
@@ -237,6 +250,10 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
           zcode: {
             ...(settings.connectors.zcode as unknown as Record<string, unknown>),
             ...((patch as { connectors?: { zcode?: Record<string, unknown> } })?.connectors?.zcode ?? {}),
+          },
+          cc: {
+            ...(settings.connectors.cc as unknown as Record<string, unknown>),
+            ...((patch as { connectors?: { cc?: Record<string, unknown> } })?.connectors?.cc ?? {}),
           },
         },
       }

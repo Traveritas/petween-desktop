@@ -564,15 +564,41 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 
 版本 0.3.15 → 0.4.0，打标签 `v0.4.0`。产物构建不在里程碑内（与 v0.1.0 同例，需要时 `pnpm dist:win`）。
 
-## Phase 15（下一主线）：Claude Code 连接器（开工准备，2026-09-20 用户拍板）
+## Phase 15：Claude Code 连接器（2026-09-20 代码完成；真机验收待用户安装 hooks）
 
-泡泡线 + 统计账本已连接器无关，第二个连接器落地即点亮 CC 的状态联动 + 全套泡泡 HUD。架构完全复用 zcode 模板（docs/06 即为此设计），预估一个 Phase。
+规格 = **docs/07**。泡泡线 + 统计账本已连接器无关，CC 连接器落地即点亮状态联动 + 全套泡泡 HUD。
 
-- **传输**（2026-09-14 已调研）：CC hooks 侧 http handler 方案，6/6 状态显式覆盖（zcode 只有 8 事件近似拼，CC 更完整）；hooks 面与 zcode 同构 → `cc-hooks.ts`（安装/卸载/合并写复用 zcode-hooks 模式，含 v0.4.0 的串行化/精确归属/.bak/非数组保护四加固）。
-- **事件映射**：CC 事件名 → NormalizedAgentEvent（PreToolUse/PostToolUse/Notification/Stop/SessionStart…），spike 需实测 stdin 载荷形状（字段命名、turnId 有无、timestamp）——照 docs/06 §8.1 的 spike 方法。
-- **复用面**：StateRelay 缝 + 伪造 DSH 信封（零 petween 改动）、stats 账本（recordState/recordEdit 直接喂）、follow 模式焦点代理、watchdog 三时值、设置卡连接器卡片（连接分区槽位已留）。
-- **开工顺序**：① spike CC hooks 载荷与配置文件格式（~/.claude/settings.json？merge 语义与 zcode config 差异）→ ② cc-hooks 安装/卸载 + 测试 → ③ cc-connector 事件映射 + watchdog + 测试 → ④ 设置卡 + 真机联测（用户重装 CC hooks + 重启 CC）。
+### Spike 结论（2026-09-20，本机 CC 2.1.234 + 官方 hooks reference）
+
+- hooks 配置在 `~/.claude/settings.json` 顶层 `hooks` 键，形状与 zcode 同构（zcode 即仿 CC）；无 `enabled` 开关（全局开关 `disableAllHooks`，不碰）。
+- exec 形式（command+args）直接 spawn 不过 shell（shell 形式走 Git Bash）——curl.exe 是真 exe 正合适，与本机已有的 Pebrel hooks 实测共存形态一致。
+- `timeout` 单位是**秒**（zcode 毫秒）；SessionEnd 事件共享 1.5s 完成预算（回环 curl 毫秒级，无碍）。
+- **settings.json 有文件监听热加载——安装/卸载即时生效，无需重启 CC**（与 zcode 的「重启客户端生效」相反）。
+- stdin 载荷公共字段含 `session_id`/`prompt_id`/`transcript_path`/`hook_event_name`；工具事件加 `tool_name`/`tool_input`；**`prompt_id` 即回合 id → turnId**。
+- matcher 语义同 zcode 族（纯字符集=精确/`|` 列表，含正则字符=不锚定 RegExp.test）。
+- 不用 CC 原生 http handler 类型：有 `allowedHttpHookUrls` 白名单约束且 URL 进用户文件（每 boot 换端口）；curl+cfg 方案端口发现只动自己目录。
+
+### 实现（264→302 用例全绿 +38，详见 docs/07）
+
+1. **共享层抽取（zcode 行为零变化，37 个 zcode 连接器用例护航）**：`hook-connector.ts`（会簿/watchdog/follow/stats/信封引擎，按 profile 参数化）、`config-io.ts`（v0.4.0 加固的读改写基建，按路径串行化）、`route-helpers.ts`（路由脚手架）。zcode 三文件变薄壳；Phase 16 Codex 是第三个消费者。
+2. **cc-connector**：CC profile——`session-end`（SessionEnd 独有 kind：清定时器后立即 dispose，**排在排惰性定时器之前**——否则残留定时器在死会话上二次 dispose，测试钉住）；PermissionRequest + Notification 共用 permission-request（waiting 视觉）；编辑工具 matcher `Edit|Write|MultiEdit|NotebookEdit`（精确列表无需正则）。
+3. **cc-hooks**：cfg 渲染/端口重写 + settings.json 合并安装/卸载，四加固全量适用（精确 cfg 路径归属/串行化/.petween-bak/非数组拒绝）；卸载后全空删整个 hooks 键；env 密钥等顶层键原样保留。
+4. **cc-routes**：`/api/petween-desktop/connector/cc/event|status|install|uninstall`；stdin JSON 解析（prompt_id→turnId）；1MB 上限/session 白名单/永远 204。
+5. **接线**：desktop-settings `connectors.cc`（enabled/followLatestUser 默认开/关，分组隔离有测试）；index.ts 镜像 zcode 块；设置卡 `HookConnectorCard` 泛型化双实例（CC 文案注明无需重启）。
+
+### 验收（待用户）
+
+- [ ] 设置→连接→Claude Code「安装 hooks」→ 状态点亮；**无需重启 CC**，新会话即联动
+- [ ] 猫在工作（编辑/命令/其他工具分别对上表情）→ 思考 → 等待授权（PermissionRequest/Notification）→ 成功 60s 衰减
+- [ ] 泡泡：思考计时/编辑行数（CC 的 Edit/Write/MultiEdit 形状）/完成摘要全链路
+- [ ] 会话结束（SessionEnd）宠物立即收泡回待机；CC 崩溃 30min 惰性 dispose 兜底
+- [ ] 卸载 hooks：settings.json 恢复（外来 hooks/env 完整）
+
+### 后置项
+
+- CC 对话泡泡（回复摘要）：`transcript_path` 可作 dialogue 数据源，zcode dialogue-source 模式可平移——用户拍板后做。
+- Notification 触发面观察（docs/07 §6.2）：不合适的等待视觉 → 摘掉 Notification 注册只留 PermissionRequest。
 
 ## Phase 16：Codex 连接器（跟随 Phase 15）
 
-Phase 7 调研归类为「command hooks」家族（与 Codex/Gemini/Cursor 同型）：传输 = 进程启动时命令行钩子或文件监听，非本机 HTTP 监听。开工前需独立 spike 确认 Codex 的事件源形态（CLI hook / 会话文件 / notify 命令），规格按 docs/06 模板立 docs/07。与 CC 连接器的公共层（hooks 安装基建、watchdog、follow、账本）在 Phase 15 中顺手抽通用。
+Phase 7 调研归类为「command hooks」家族（与 Codex/Gemini/Cursor 同型）：传输 = 进程启动时命令行钩子或文件监听，非本机 HTTP 监听。开工前需独立 spike 确认 Codex 的事件源形态（CLI hook / 会话文件 / notify 命令），规格按 docs/06/07 模板立 docs/08。公共层（hook-connector 引擎、config-io、route-helpers）已在 Phase 15 抽出就位。
