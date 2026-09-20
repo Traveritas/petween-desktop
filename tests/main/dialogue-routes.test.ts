@@ -61,11 +61,28 @@ describe(`GET ${DIALOGUE_PATH}`, () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('NO_REPLY')
   })
 
-  it('answers 500 INTERNAL when a source rejects', async () => {
+  it('answers 500 INTERNAL when every source rejects', async () => {
     latestReply.mockRejectedValueOnce(new Error('boom'))
+    fallbackReply.mockRejectedValueOnce(new Error('bam'))
     const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
     expect(res.status).toBe(500)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('INTERNAL')
+  })
+
+  it('one broken source does not mask the others (phase-review fix)', async () => {
+    latestReply.mockRejectedValueOnce(new Error('cc transcript exploded'))
+    fallbackReply.mockResolvedValueOnce({ sessionId: 's1', turnId: 't1', text: 'from zcode', at: 5 })
+    const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ text: 'from zcode' })
+  })
+
+  it('a rejecting source plus a clean NO_REPLY answers 404, not 500', async () => {
+    latestReply.mockRejectedValueOnce(new Error('boom'))
+    fallbackReply.mockResolvedValueOnce(null)
+    const res = await fetch(`${base}${DIALOGUE_PATH}?session=s1`)
+    expect(res.status).toBe(404)
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('NO_REPLY')
   })
 
   it('rejects non-GET', async () => {

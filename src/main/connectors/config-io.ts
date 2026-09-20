@@ -7,7 +7,7 @@
  * read-modify-write pair, corrupt-file refusal (user data is never
  * clobbered by a parse failure).
  */
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 /** null = missing file (fresh install); throws on present-but-corrupt. */
@@ -43,6 +43,16 @@ export async function writeConfigAtomic(path: string, config: Record<string, unk
     // absent on fresh installs — nothing to back up
   }
   await rename(tmp, path)
+}
+
+/**
+ * Remove our one-generation backup. Called after a successful UNINSTALL:
+ * the backup's recovery mission is over, and it may hold secrets the user
+ * has since removed from the live config (env tokens in ~/.claude/
+ * settings.json) — it must not outlive our tenancy (phase-review fix).
+ */
+export async function removeBackup(path: string): Promise<void> {
+  await rm(`${path}.petween-bak`, { force: true }).catch(() => {})
 }
 
 /**

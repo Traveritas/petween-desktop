@@ -181,6 +181,14 @@ describe('install', () => {
     })
   })
 
+  it('refuses a malformed (non-object) top-level hooks value, same semantics', async () => {
+    const initial = JSON.stringify({ hooks: 'oops' })
+    await withTempConfig(initial, async (settingsPath) => {
+      await expect(installCcHooks(paths(settingsPath))).rejects.toThrow(/hooks is not an object/)
+      expect(await readFile(settingsPath, 'utf8')).toBe(initial)
+    })
+  })
+
   it('leaves a .petween-bak backup of the previous config on every rewrite', async () => {
     await withTempConfig(null, async (settingsPath) => {
       await installCcHooks(paths(settingsPath))
@@ -221,14 +229,16 @@ describe('uninstall', () => {
     })
   })
 
-  it('drops the hooks key entirely when nothing remains', async () => {
+  it('drops the hooks key entirely when nothing remains, and cleans the .petween-bak (secrets must not outlive our tenancy)', async () => {
     const initial = JSON.stringify({ model: 'fable' })
     await withTempConfig(initial, async (settingsPath) => {
       await installCcHooks(paths(settingsPath))
+      expect(await readFile(`${settingsPath}.petween-bak`, 'utf8')).toBeDefined() // install keeps the backup
       await uninstallCcHooks(paths(settingsPath))
       const config = JSON.parse(await readFile(settingsPath, 'utf8'))
       expect(config.hooks).toBeUndefined()
       expect(config.model).toBe('fable')
+      await expect(readFile(`${settingsPath}.petween-bak`, 'utf8')).rejects.toThrow() // uninstall removes it
     })
   })
 

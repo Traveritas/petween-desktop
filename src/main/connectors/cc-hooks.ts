@@ -29,7 +29,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { readConfigObject, serializedWrite, writeConfigAtomic } from './config-io'
+import { readConfigObject, removeBackup, serializedWrite, writeConfigAtomic } from './config-io'
 import type { CcHookKind } from './cc-connector'
 
 /** CC event registrations: petween kind → CC event + optional tool matcher. */
@@ -154,7 +154,13 @@ export interface CcHooksPaths {
 export function installCcHooks(paths: CcHooksPaths): Promise<void> {
   return serializedWrite(paths.settingsPath, async () => {
     const config = (await readConfigObject(paths.settingsPath)) ?? {}
-    const hooks = (typeof config.hooks === 'object' && config.hooks !== null && !Array.isArray(config.hooks) ? config.hooks : {}) as Record<string, unknown>
+    const rawHooks = config.hooks
+    if (rawHooks !== undefined && (typeof rawHooks !== 'object' || rawHooks === null || Array.isArray(rawHooks))) {
+      // Same refusal semantics as a malformed event value: malformed user
+      // data is never silently replaced (phase-review consistency fix).
+      throw new Error(`settings.json hooks is not an object — refusing to overwrite user data (${paths.settingsPath})`)
+    }
+    const hooks = (rawHooks ?? {}) as Record<string, unknown>
 
     const ours = buildCcHookEvents(paths.cfgDir)
     const merged: Record<string, unknown> = {}
@@ -208,6 +214,9 @@ export function uninstallCcHooks(paths: CcHooksPaths): Promise<boolean> {
     if (Object.keys(next).length > 0) config.hooks = next
     else delete config.hooks // back to no hooks key at all
     await writeConfigAtomic(paths.settingsPath, config)
+    // Our tenancy ended — the backup (which mirrors the user's env secrets)
+    // must not outlive it.
+    await removeBackup(paths.settingsPath)
     return true
   })
 }

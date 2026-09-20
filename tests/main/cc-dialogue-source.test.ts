@@ -125,4 +125,27 @@ describe('createCcDialogueSource', () => {
       expect(await source.latestReply('../escape')).toBeNull()
     })
   })
+
+  it('drops registry paths outside ~/.claude/projects (forged-payload guard, phase-review fix)', async () => {
+    await withProjects(async ({ claudeDir, file }) => {
+      const source = createCcDialogueSource({ claudeDir: () => claudeDir, now: () => 1 })
+      source.noteTranscript(SESSION, 'C:/Windows/system32/config.json') // outside projects
+      source.noteTranscript(SESSION, file.replace('/projects/', '/elsewhere/')) // sibling of projects
+      source.noteTranscript(SESSION, '') // junk
+      // Registry rejected everything → falls to scan → finds the real file.
+      const preview = await source.latestReply(SESSION)
+      expect(preview?.turnId).toBe('prompt_5')
+      // A valid path still registers and wins over the scan.
+      source.noteTranscript(SESSION, file)
+      expect((await source.latestReply(SESSION))?.text).toContain('最终回复')
+    })
+  })
+
+  it('caps total transcript bytes — an oversized file answers null, not OOM', async () => {
+    await withProjects(async ({ claudeDir }) => {
+      const source = createCcDialogueSource({ claudeDir: () => claudeDir, now: () => 1, maxTotalBytes: 16 })
+      // The fixture file is well over 16 bytes total.
+      expect(await source.latestReply(SESSION)).toBeNull()
+    })
+  })
 })

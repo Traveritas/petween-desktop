@@ -403,6 +403,7 @@ async function bootstrap(): Promise<void> {
     if (rescueHotkey !== null) globalShortcut.unregister(rescueHotkey)
     physics.dispose()
     zcodeConnector.dispose()
+    ccConnector.dispose()
     bridge?.close()
     tray.destroy()
     void server?.close().catch(() => {})

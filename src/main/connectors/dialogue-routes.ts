@@ -31,15 +31,28 @@ export function registerDialogueRoutes(
       const sessionId = url.searchParams.get('session') ?? ''
       void (async () => {
         let preview: DialoguePreview | null = null
+        let cleanProbe = false // at least one source answered (even with null)
         for (const source of deps.sources) {
-          preview = await source.latestReply(sessionId)
+          try {
+            preview = await source.latestReply(sessionId)
+            cleanProbe = true
+          } catch {
+            // one broken source must not mask the others
+          }
           if (preview !== null) break
         }
-        return preview
+        return { preview, cleanProbe }
       })().then(
-        (preview) => {
+        ({ preview, cleanProbe }) => {
           if (res.destroyed || res.writableEnded) return
           if (preview === null) {
+            // Every source rejected = internal failure; a clean NO_REPLY
+            // needs at least one source that answered.
+            if (!cleanProbe) {
+              res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+              res.end(JSON.stringify({ error: { code: 'INTERNAL', message: 'dialogue read failed' } }))
+              return
+            }
             res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
             res.end(JSON.stringify({ error: { code: 'NO_REPLY', message: 'no completed reply' } }))
             return

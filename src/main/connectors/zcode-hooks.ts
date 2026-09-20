@@ -17,7 +17,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { readConfigObject, serializedWrite, writeConfigAtomic } from './config-io'
+import { readConfigObject, removeBackup, serializedWrite, writeConfigAtomic } from './config-io'
 import type { ZcodeHookKind } from './zcode-connector'
 
 /** Every event kind gets one cfg file; PostToolUseFailure shares post-tool. */
@@ -200,6 +200,8 @@ export function uninstallZcodeHooks(paths: ZcodeHooksPaths): Promise<boolean> {
     const hasEvents = Object.keys(next).length > 0
     config.hooks = { ...hooks, events: next, enabled: hasEvents ? (hooks.enabled ?? true) : false }
     await writeConfigAtomic(paths.zcodeConfigPath, config)
+    // Tenancy ended — drop the one-generation backup (cc parity).
+    await removeBackup(paths.zcodeConfigPath)
     return true
   })
 }
