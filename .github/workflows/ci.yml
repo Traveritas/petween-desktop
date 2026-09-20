@@ -1,0 +1,35 @@
+# CI (v0.7.2): typecheck + tests on windows-latest. The suite is fully
+# self-contained — Electron is mocked (vi.mock('electron')), the two
+# execution-level e2e tests skip themselves when curl is absent (it isn't,
+# on windows runners). Mirrors the README bootstrap: submodules → petween
+# build (editor.js bundle) → root install.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build petween submodule (editor bundle)
+        run: |
+          pnpm --dir vendor/petween install --no-frozen-lockfile
+          pnpm --dir vendor/petween run build
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
