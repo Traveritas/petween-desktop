@@ -121,3 +121,8 @@ export type RoamerCommand =
    * from `edge` anchored near the pet, or a sticky note at a random spot.
    */
   | { type: 'spawn-window'; kind: 'pull' | 'note'; edge?: PullEdge; content: RoamerContentItem }
+  /**
+   * The pet arrived at `edge` for a peek — play the lean-past-edge motion
+   * (batch 4). The engine occupies the pet for PEEK_DURATION_MS.
+   */
+  | { type: 'peek-start'; edge: PullEdge }

@@ -25,7 +25,12 @@ import type { TimelineInstance } from 'petween/motion/animation-handle'
 import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import { createRoamerEngine } from './engine'
 import { normalizeRoamerOptions } from './options'
-import { IDLE_ACTION_ANIMATION_IDS, WALK_BOB_ANIMATION_ID } from './animations'
+import {
+  IDLE_ACTION_ANIMATION_IDS,
+  PEEK_LEFT_ANIMATION_ID,
+  PEEK_RIGHT_ANIMATION_ID,
+  WALK_BOB_ANIMATION_ID,
+} from './animations'
 import { createRoamerWindowHost, type RoamerWindowHost } from './windows'
 import {
   ROAMER_ID,
@@ -221,6 +226,10 @@ export function createRoamerCompanion(): DesktopCompanion {
             break
           case 'spawn-window':
             spawnWindow(command)
+            break
+          case 'peek-start':
+            // The lean-past-edge motion; self-finishing (once), no flash.
+            petween.playAnimation(command.edge === 'left' ? PEEK_LEFT_ANIMATION_ID : PEEK_RIGHT_ANIMATION_ID)
             break
         }
       }

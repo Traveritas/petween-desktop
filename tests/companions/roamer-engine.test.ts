@@ -296,10 +296,18 @@ describe('mischief', () => {
     { id: 'p1', kind: 'image' as const, url: '/petween-assets/a' },
     { id: 'p2', kind: 'text' as const, text: '便签内容' },
   ]
+  /** Only the given mischief action enabled (selection is random-index). */
+  const only = (action: 'pullWindow' | 'stickyNote' | 'dashAcross' | 'edgePeek') => ({
+    pullWindow: action === 'pullWindow',
+    stickyNote: action === 'stickyNote',
+    dashAcross: action === 'dashAcross',
+    edgePeek: action === 'edgePeek',
+  })
+  const fastMischief = { minIntervalMs: 5000, maxIntervalMs: 5000 }
 
   it('fires a sticky note immediately (shake flavor + spawn), stationary', () => {
     // interval 5000ms so mischief is the first decision; wander would be 6000.
-    const engine = engineWith(undefined, undefined, undefined, { minIntervalMs: 5000, maxIntervalMs: 5000 }, pool)
+    const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('stickyNote') }, pool)
     arm(engine)
     const commands = engine.apply({ type: 'tick', now: T0 + 5000 })
     expect(types(commands)).toEqual(['idle-action-start', 'spawn-window'])
@@ -312,13 +320,7 @@ describe('mischief', () => {
   })
 
   it('walks to the nearest edge first, then spawns the pulled window on leg-complete', () => {
-    const engine = engineWith(
-      undefined,
-      undefined,
-      undefined,
-      { minIntervalMs: 5000, maxIntervalMs: 5000, actions: { stickyNote: false } },
-      pool,
-    )
+    const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('pullWindow') }, pool)
     arm(engine)
     const start = walkStartAt(engine, T0 + 5000)
     // pet at x=960, stage 128: left edge 16 (944 away), right edge 1776 (816 away) → right
@@ -333,13 +335,7 @@ describe('mischief', () => {
   })
 
   it('pulls without walking when already at the edge', () => {
-    const engine = engineWith(
-      undefined,
-      undefined,
-      undefined,
-      { minIntervalMs: 5000, maxIntervalMs: 5000, actions: { stickyNote: false } },
-      pool,
-    )
+    const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('pullWindow') }, pool)
     arm(engine, snap({ x: 1750 }))
     const commands = engine.apply({ type: 'tick', now: T0 + 5000 })
     expect(types(commands)).toEqual(['spawn-window'])
@@ -347,13 +343,7 @@ describe('mischief', () => {
   })
 
   it('drops the pull payload when the leg is aborted by a drag', () => {
-    const engine = engineWith(
-      undefined,
-      undefined,
-      undefined,
-      { minIntervalMs: 5000, maxIntervalMs: 5000, actions: { stickyNote: false } },
-      pool,
-    )
+    const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('pullWindow') }, pool)
     arm(engine)
     walkStartAt(engine, T0 + 5000)
     // drag abort emits only wander-end — the window never spawns
@@ -363,12 +353,49 @@ describe('mischief', () => {
     expect(types(engine.apply({ type: 'leg-complete', now: T0 + 9999 }))).toEqual([])
   })
 
-  it('reschedules silently when the content pool is empty', () => {
+  it('dashes across to the far side at 4x speed without needing the pool', () => {
+    const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('dashAcross') })
+    arm(engine)
+    const start = walkStartAt(engine, T0 + 5000)
+    // pet at x=960 is NOT left of center (960 < 960 false) → far side = left edge
+    expect(start.to.x).toBe(16)
+    const distance = Math.hypot(start.to.x - start.from.x, start.to.y - start.from.y)
+    expect(start.durationMs).toBeCloseTo((distance / (DEFAULT_WANDER.speedPxPerSec * 4)) * 1000, 0)
+  })
+
+  it('peeks: walks to the nearest edge, leans (occupancy), then rests', () => {
+    // Long interval so the NEXT mischief is far away and the post-lean
+    // window is provably quiet (wander waits its full pause too).
+    const engine = engineWith(undefined, undefined, undefined, {
+      minIntervalMs: 30000,
+      maxIntervalMs: 30000,
+      actions: only('edgePeek'),
+    })
+    arm(engine)
+    const start = walkStartAt(engine, T0 + 30000)
+    const arrival = T0 + 30000 + start.durationMs
+    expect(types(engine.apply({ type: 'leg-complete', now: arrival }))).toEqual(['wander-end', 'peek-start'])
+    expect(engine.apply({ type: 'leg-complete', now: arrival })).toEqual([])
+
+    // during the lean: no new decisions; after PEEK_DURATION_MS: quiet rest
+    expect(types(engine.apply({ type: 'tick', now: arrival + 2599 }))).toEqual([])
+    expect(types(engine.apply({ type: 'tick', now: arrival + 2601 }))).toEqual([])
+  })
+
+  it('peeks immediately when already at the edge', () => {
+    const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('edgePeek') })
+    arm(engine, snap({ x: 20 }))
+    const commands = engine.apply({ type: 'tick', now: T0 + 5000 })
+    expect(types(commands)).toEqual(['peek-start'])
+    expect(commands[0]).toMatchObject({ edge: 'left' })
+  })
+
+  it('reschedules silently when the content pool is empty and only content actions are on', () => {
     const engine = engineWith(
       { enabled: false },
       { enabled: false },
       undefined,
-      { minIntervalMs: 5000, maxIntervalMs: 5000 },
+      { ...fastMischief, actions: { pullWindow: true, stickyNote: true, dashAcross: false, edgePeek: false } },
     )
     arm(engine)
     expect(types(engine.apply({ type: 'tick', now: T0 + 5000 }))).toEqual([])
@@ -381,7 +408,7 @@ describe('mischief', () => {
       { enabled: false },
       { enabled: false },
       undefined,
-      { enabled: false, minIntervalMs: 5000, maxIntervalMs: 5000 },
+      { enabled: false, ...fastMischief },
     )
     arm(disabled)
     expect(types(disabled.apply({ type: 'tick', now: T0 + 100000 }))).toEqual([])
@@ -391,9 +418,8 @@ describe('mischief', () => {
       { enabled: false },
       undefined,
       {
-        minIntervalMs: 5000,
-        maxIntervalMs: 5000,
-        actions: { pullWindow: false, stickyNote: false },
+        ...fastMischief,
+        actions: { pullWindow: false, stickyNote: false, dashAcross: false, edgePeek: false },
       },
     )
     arm(allOff)

@@ -153,6 +153,44 @@ export const SHAKE_ANIMATION: AnimationDefinition = {
   ],
 }
 
+/**
+ * Edge peeks (batch 4): the pet leans PAST the screen edge on the motion
+ * layer — transition.x is a pure visual offset (the §27 position clamp
+ * keeps the stage box ≥32px visible; the lean is what sells the peek).
+ * Facing per edge: left peeks lean negative, right positive. Mirroring a
+ * user's walk POSE is impossible through the pose channel (zoom validates
+ * 0.2..8, no negatives) — peeks lean instead, which needs no pose at all.
+ */
+export const PEEK_LEFT_ANIMATION_ID = 'user:roamer-edge-peek-left'
+export const PEEK_RIGHT_ANIMATION_ID = 'user:roamer-edge-peek-right'
+
+/** How long the engine occupies the pet for one peek. */
+export const PEEK_DURATION_MS = 2600
+
+const peekAnimation = (id: string, name: string, direction: 1 | -1): AnimationDefinition => ({
+  version: 1,
+  id,
+  name,
+  kind: 'interaction',
+  durationMs: PEEK_DURATION_MS,
+  repeat: { mode: 'once' },
+  tracks: [
+    {
+      property: 'transition.x',
+      keyframes: [
+        { at: 0, value: 0, easing: 'ease-in-out' },
+        { at: 0.25, value: 44 * direction, easing: 'linear' },
+        { at: 0.45, value: 12 * direction, easing: 'ease-in-out' },
+        { at: 0.75, value: 44 * direction, easing: 'linear' },
+        { at: 1, value: 0 },
+      ],
+    },
+  ],
+})
+
+export const PEEK_LEFT_ANIMATION: AnimationDefinition = peekAnimation(PEEK_LEFT_ANIMATION_ID, 'Roamer Edge Peek Left', -1)
+export const PEEK_RIGHT_ANIMATION: AnimationDefinition = peekAnimation(PEEK_RIGHT_ANIMATION_ID, 'Roamer Edge Peek Right', 1)
+
 /** Everything the host assembly registers once (idempotently). */
 export const ROAMER_ANIMATIONS: readonly AnimationDefinition[] = [
   WALK_BOB_ANIMATION,
@@ -160,6 +198,8 @@ export const ROAMER_ANIMATIONS: readonly AnimationDefinition[] = [
   LOOK_AROUND_ANIMATION,
   SWAY_ANIMATION,
   SHAKE_ANIMATION,
+  PEEK_LEFT_ANIMATION,
+  PEEK_RIGHT_ANIMATION,
 ]
 
 /** Playback id per idle action (every action has a default motion). */

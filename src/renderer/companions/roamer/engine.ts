@@ -12,7 +12,7 @@
  * denied lease ('lease-denied') simply reschedules the next attempt.
  */
 import type { StageSnapshot } from 'petween/client/extension-service'
-import { IDLE_ACTION_DURATIONS_MS } from './animations'
+import { IDLE_ACTION_DURATIONS_MS, PEEK_DURATION_MS } from './animations'
 import type {
   IdleActionId,
   MischiefActionId,
@@ -36,6 +36,9 @@ const MAX_LEG_MS = 30000
 const MIN_PULL_LEG_MS = 600
 /** Already this close to the edge: pull without walking. */
 const PULL_SKIP_WALK_PX = 48
+/** Dash legs run this many times the configured walk speed. */
+const DASH_SPEED_FACTOR = 4
+const MIN_DASH_LEG_MS = 400
 /** Target margins keep the WHOLE pet on screen (§27 only guarantees 32px). */
 const TARGET_MARGIN_PX = 8
 const BOTTOM_MARGIN_PX = 12
@@ -53,11 +56,12 @@ interface WalkingMode {
   leg: WanderLegPlan
   startedAt: number
   /**
-   * Batch 3: this walk serves a mischief pull — on leg-complete the
-   * content window spawns; on any abort the payload is silently dropped
-   * (a window pulled out mid-drag would be rude, not fun).
+   * Batches 3/4: this walk may serve a mischief purpose — on leg-complete
+   * a pull spawns its content window, a peek plays the lean-past-edge
+   * motion; on any abort the payload is silently dropped (a window pulled
+   * out mid-drag would be rude, not fun). Null = a plain wander leg.
    */
-  purpose: { kind: 'pull'; edge: PullEdge; content: RoamerContentItem } | null
+  purpose: { kind: 'pull'; edge: PullEdge; content: RoamerContentItem } | { kind: 'peek'; edge: PullEdge } | null
 }
 
 interface IdleActionMode {
@@ -67,7 +71,14 @@ interface IdleActionMode {
   durationMs: number
 }
 
-type EngineMode = { kind: 'rest' } | WalkingMode | IdleActionMode
+/** A peek in progress (post-arrival): stationary occupancy for the lean animation. */
+interface PeekMode {
+  kind: 'peek'
+  startedAt: number
+  durationMs: number
+}
+
+type EngineMode = { kind: 'rest' } | WalkingMode | IdleActionMode | PeekMode
 
 export interface RoamerEngine {
   apply(event: RoamerEvent): RoamerCommand[]
@@ -165,8 +176,8 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
   const mischiefIntervalMs = (options: RoamerOptions): number =>
     between(options.mischief.minIntervalMs, options.mischief.maxIntervalMs)
 
-  /** Mischief actions the engine can actually perform in this batch. */
-  const SCHEDULED_MISCHIEF: readonly MischiefActionId[] = ['pullWindow', 'stickyNote']
+  /** Mischief actions the engine can actually perform (batch 4: all four). */
+  const SCHEDULED_MISCHIEF: readonly MischiefActionId[] = ['pullWindow', 'stickyNote', 'dashAcross', 'edgePeek']
 
   const enabledMischief = (options: RoamerOptions): MischiefActionId[] =>
     SCHEDULED_MISCHIEF.filter((id) => options.mischief.actions[id])
@@ -194,6 +205,27 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
     return { edge, leg: { from, to, durationMs } }
   }
 
+  /** A dash crosses to the FAR side at DASH_SPEED_FACTOR × walk speed. */
+  const planDashLeg = (options: RoamerOptions): WanderLegPlan => {
+    const current = snapshot
+    const stage = current === null ? 128 : current.stageSize * current.scale
+    const viewport = current === null ? { width: 1920, height: 1080 } : current.viewport
+    const from =
+      current === null ? { x: viewport.width / 2, y: viewport.height / 2 } : { x: current.x, y: current.y }
+    const edgeMargin = 16
+    // Far side from where the pet stands now.
+    const to = {
+      x: from.x < viewport.width / 2 ? Math.max(edgeMargin, viewport.width - stage - edgeMargin) : edgeMargin,
+      y: Math.max(TARGET_MARGIN_PX, Math.min(from.y, viewport.height - stage - BOTTOM_MARGIN_PX)),
+    }
+    const distance = Math.hypot(to.x - from.x, to.y - from.y)
+    const durationMs = Math.min(
+      MAX_LEG_MS,
+      Math.max(MIN_DASH_LEG_MS, (distance / (options.wander.speedPxPerSec * DASH_SPEED_FACTOR)) * 1000),
+    )
+    return { from, to, durationMs }
+  }
+
   return {
     apply(event: RoamerEvent): RoamerCommand[] {
       const commands: RoamerCommand[] = []
@@ -204,6 +236,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             // Session gone: drop any leg un-committed and re-arm on return.
             endWalk(false, Date.now(), commands)
             endIdleAction(commands)
+            if (mode.kind === 'peek') mode = { kind: 'rest' }
             armed = false
             pendingArm = false
             userDragging = false
@@ -251,6 +284,12 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
               break
             }
           }
+          if (mode.kind === 'peek') {
+            // The lean animation self-finishes; occupancy just gates other
+            // decisions until it is over.
+            if (event.now >= mode.startedAt + mode.durationMs) mode = { kind: 'rest' }
+            else break
+          }
           // Decision priority: mischief (rare, purposeful) > wander > idle.
           const autonomous = autonomyOpen(options)
           let decided = false
@@ -260,24 +299,27 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             event.now >= nextMischiefAt &&
             enabledMischief(options).length > 0
           ) {
+            const candidates = enabledMischief(options)
+            const action = candidates[Math.floor(random() * candidates.length)]
+            // Only the content actions need the pool; dash/peek stand alone.
+            const needsPool = action === 'pullWindow' || action === 'stickyNote'
             const pool = options.contentPool
-            if (pool.length === 0) {
+            if (needsPool && pool.length === 0) {
               // Nothing to show yet — retry next interval without blocking
               // the other decisions below.
               nextMischiefAt = event.now + mischiefIntervalMs(options)
             } else {
               decided = true
-              const candidates = enabledMischief(options)
-              const action = candidates[Math.floor(random() * candidates.length)]
-              const content = pool[Math.floor(random() * pool.length)]
               nextMischiefAt = event.now + mischiefIntervalMs(options)
               if (action === 'stickyNote') {
+                const content = pool[Math.floor(random() * pool.length)]
                 // Stationary mischief: a quick shake "places" the note.
                 const durationMs = IDLE_ACTION_DURATIONS_MS.shake
                 mode = { kind: 'idle-action', action: 'shake', startedAt: event.now, durationMs }
                 commands.push({ type: 'idle-action-start', action: 'shake', durationMs })
                 commands.push({ type: 'spawn-window', kind: 'note', content })
-              } else {
+              } else if (action === 'pullWindow') {
+                const content = pool[Math.floor(random() * pool.length)]
                 const { edge, leg } = planPullLeg(options)
                 const distance = Math.hypot(leg.to.x - leg.from.x, leg.to.y - leg.from.y)
                 if (distance < PULL_SKIP_WALK_PX) {
@@ -288,6 +330,26 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
                     leg,
                     startedAt: event.now,
                     purpose: { kind: 'pull', edge, content },
+                  }
+                  commands.push({ type: 'wander-start', ...leg })
+                }
+              } else if (action === 'dashAcross') {
+                const leg = planDashLeg(options)
+                mode = { kind: 'walking', leg, startedAt: event.now, purpose: null }
+                commands.push({ type: 'wander-start', ...leg })
+              } else {
+                // edgePeek
+                const { edge, leg } = planPullLeg(options)
+                const distance = Math.hypot(leg.to.x - leg.from.x, leg.to.y - leg.from.y)
+                if (distance < PULL_SKIP_WALK_PX) {
+                  mode = { kind: 'peek', startedAt: event.now, durationMs: PEEK_DURATION_MS }
+                  commands.push({ type: 'peek-start', edge })
+                } else {
+                  mode = {
+                    kind: 'walking',
+                    leg,
+                    startedAt: event.now,
+                    purpose: { kind: 'peek', edge },
                   }
                   commands.push({ type: 'wander-start', ...leg })
                 }
@@ -325,12 +387,15 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
         }
         case 'leg-complete': {
           // A completed pull leg drops its payload window right where the
-          // pet landed (any abort path drops it silently instead).
+          // pet landed; a completed peek leg plays the lean motion (any
+          // abort path drops the purpose silently instead).
           const purpose = mode.kind === 'walking' ? mode.purpose : null
           endWalk(true, event.now, commands)
-          if (purpose !== null) {
+          if (purpose !== null && purpose.kind === 'pull') {
             commands.push({ type: 'spawn-window', kind: 'pull', edge: purpose.edge, content: purpose.content })
-            nextMischiefAt = event.now + mischiefIntervalMs(deps.getOptions())
+          } else if (purpose !== null && purpose.kind === 'peek') {
+            mode = { kind: 'peek', startedAt: event.now, durationMs: PEEK_DURATION_MS }
+            commands.push({ type: 'peek-start', edge: purpose.edge })
           }
           break
         }
@@ -347,6 +412,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
             // The user's hand outranks everything; the drag's own end persists.
             endWalk(false, event.now, commands)
             endIdleAction(commands)
+            if (mode.kind === 'peek') mode = { kind: 'rest' }
           } else {
             // After being handled the pet rests a full pause, not the remainder.
             if (armed) {
@@ -363,6 +429,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           // linger invisibly past the window's return).
           endWalk(true, event.now, commands)
           endIdleAction(commands)
+          if (mode.kind === 'peek') mode = { kind: 'rest' }
           nextIdleActionAt = event.now + idleIntervalMs(deps.getOptions())
           break
         }
