@@ -52,16 +52,17 @@ export function StatsHudCard(): JSX.Element {
   }, [])
 
   const patch = (next: OptionBag): void => {
-    setBag((current) => {
-      const merged = { ...(current ?? {}), ...next }
-      setTypes(migrateTypeConfigs(merged))
-      void fetch('/api/petween-desktop/settings', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ companions: { options: { [STATS_HUD_ID]: merged } } }),
-      }).catch(() => {})
-      return merged
-    })
+    // Side effects stay OUT of the setState updater (StrictMode double-invokes
+    // updaters — a fetch inside one would fire twice): merge against the
+    // latest committed bag, then set + PUT.
+    const merged = { ...(bag ?? {}), ...next }
+    setBag(merged)
+    setTypes(migrateTypeConfigs(merged))
+    void fetch('/api/petween-desktop/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ companions: { options: { [STATS_HUD_ID]: merged } } }),
+    }).catch(() => {})
   }
 
   const patchType = (type: BubbleTypeKey, field: string, value: unknown): void => {

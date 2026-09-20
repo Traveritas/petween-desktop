@@ -121,3 +121,4 @@ pnpm dist:win                                                            # petwe
 - Electron 行为疑问查 docs/04（含 issue 号），尤其穿透相关的三个已知坑。
 - 完成任何阶段后在 docs/05 勾选条目并在本节追加一行状态记录。
 - **2026-09-20（v0.7.0 里程碑）**：五路综合评审 v0.4.0 以来 9 提交——零 P0、1 P1（config-io 瞬时读错误当全新安装可塌缩用户配置）全修 + 18 项 P2 当场修（安全 4/主进程 7/渲染 5/文档 11 + 测试 2 修正），364 用例全绿（+12 含 sink 执行级 e2e）打标签。连接器插件化拍板：暂不（代码级 SDK 已就位，触发式抽取——见 docs/05 v0.7.0 节）。backlog：follow 跨连接器仲裁、翻转接线提纯、e2e 现行形态、敌对形状钉测试。
+- **2026-09-20（backlog 好修批，v0.7.1）**：①follow 跨连接器仲裁（引擎 onFocusAcquired/retireFollowTarget + index.ts 三连接器仲裁器——双 CLI 跟随不再两脸摇摆）；②zcode dialogue 源流式化（64 行候选驻留改逐行归约只留最后一条，与 CC 源同 posture）；③DSH bridge 崩溃自动退避重启（此前崩溃后只能靠设置开关复活）；④settings-card fetch 移出 setState updater（StrictMode 双发风险）；⑤敌对形状钉测试（cc/codex 源各 +遍历出根/兄弟前缀/UNC/小写盘符——顺带实证「resolve 先折叠、前缀后查」的出根性质）+ 路由测试 mock 清理。367 用例全绿（+3）。剩余 backlog：companion 重挂载预热、Playwright 冒烟、jsdom 泡泡测试、翻转接线提纯、e2e stdin 形态、屏幕顶部三区域互避。

@@ -92,10 +92,12 @@ export function createDialogueSource(deps: DialogueSourceDeps): DialogueSource {
       try {
         // STREAM forward instead of a fixed tail window: one model_io line
         // embeds the whole request context (verified >1 MB per line on a long
-        // session), so any window can miss the last stop line. The cheap
-        // substring pre-filter means those giant non-stop lines never pay a
-        // JSON.parse; memory stays at one line at a time.
-        const candidates: string[] = []
+        // session), so any window can miss the last stop line. The substring
+        // pre-filter means giant non-stop lines never pay a JSON.parse, and
+        // since v0.7.1 the parse is per-line with only the LAST valid reply
+        // retained (one line in memory at a time, same posture as the CC
+        // source — previously up to MAX_CANDIDATES whole lines lingered).
+        let best: { turnId: string | null; text: string } | null = null
         const reader = createInterface({ input: handle.createReadStream({ encoding: 'utf8' }), crlfDelay: Infinity })
         for await (const line of reader) {
           // Damaged-input bound: a corrupted/hostile rollout with no newlines
@@ -103,10 +105,10 @@ export function createDialogueSource(deps: DialogueSourceDeps): DialogueSource {
           // >1 MB; the cap sits far above anything real and skips the line).
           if (line.length > MAX_LINE_BYTES) continue
           if (!line.includes('"stop"')) continue
-          candidates.push(line)
-          if (candidates.length > MAX_CANDIDATES) candidates.shift()
+          const parsed = extractLastReply([line])
+          if (parsed !== null) best = parsed
         }
-        const reply = extractLastReply(candidates)
+        const reply = best
         if (reply === null) return null
         return { sessionId, turnId: reply.turnId, text: truncatePreview(reply.text), at: deps.now() }
       } finally {

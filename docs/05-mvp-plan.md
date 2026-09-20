@@ -645,10 +645,10 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 
 ### Backlog（按价值排序，未修项）
 
-1. follow 模式跨连接器互不感知（双 CLI 同时开跟随时宠物两脸摇摆）——跨连接器焦点仲裁器或文档明示。
+1. ~~follow 模式跨连接器互不感知~~（✅ v0.7.1：引擎 onFocusAcquired + retireFollowTarget，index.ts 仲裁器——任一连接器获得跟随时退休其余 target）。
 2. index.ts 启停翻转接线提纯函数并测（A2）；zcode-e2e 补 stdin JSON 现行形态（A4）。
-3. isProjectsPath/isSessionsPath 的敌对形状钉测试（A3：遍历/兄弟/UNC/小写盘符——实现已实证正确，缺钉）。
-4. 路由测试 mock 清理队列补全（B3）。
+3. ~~isProjectsPath/isSessionsPath 的敌对形状钉测试~~（✅ v0.7.1：cc/codex 两源各钉遍历出根/兄弟前缀/UNC/小写盘符）。
+4. ~~路由测试 mock 清理队列补全~~（✅ v0.7.1）。
 
 ### 里程碑动作
 

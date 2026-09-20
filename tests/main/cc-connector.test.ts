@@ -234,3 +234,29 @@ describe('stats recording (CC payload shape)', () => {
     expect(calls).toContainEqual({ kind: 'dispose', sessionId: SESSION })
   })
 })
+
+describe('cross-connector follow arbitration', () => {
+  const OTHER = 'cc_arbit_other'
+
+  it('acquiring a focus target fires onFocusAcquired; retireFollowTarget emits idle and clears', () => {
+    const { relay, emissions } = fakeRelay()
+    const acquired: string[] = []
+    const connector = createCcConnector({
+      relay,
+      now: () => 1_000,
+      isFollowEnabled: () => true,
+      onFocusAcquired: (sessionId) => acquired.push(sessionId),
+    })
+    connector.handle({ kind: 'user-prompt-submit', sessionId: SESSION })
+    expect(acquired).toEqual([SESSION])
+
+    connector.retireFollowTarget()
+    expect(connector.status().followTarget).toBeNull()
+    expect(emissions.some((e) => e.method === 'status' && e.status === 'idle' && e.sessionId === SESSION)).toBe(true)
+    // Retiring again is a no-op (no duplicate idle).
+    emissions.length = 0
+    connector.retireFollowTarget()
+    expect(emissions).toEqual([])
+    void OTHER
+  })
+})

@@ -239,10 +239,25 @@ export function createDshBridge(deps: BridgeDeps): { start(): void; close(): voi
   return {
     start() {
       if (loop !== null || closed) return
-      loop = runLoop().catch((error: unknown) => {
-        log(`loop crashed: ${String(error)}`)
-        setStatus('disconnected', 'crashed')
-      })
+      // Crash recovery (v0.7.1 backlog fix): runLoop only EXITS by throwing
+      // (crash) or by epoch guard (close/supersede). Previously a crash left
+      // loop non-null forever — only the settings toggle could revive the
+      // bridge. Now: log, back off, restart — until close().
+      loop = (async (): Promise<void> => {
+        for (;;) {
+          if (closed) return
+          try {
+            await runLoop()
+            return // epoch-guarded exit — nothing to restart
+          } catch (error: unknown) {
+            log(`loop crashed: ${String(error)}`)
+            setStatus('disconnected', 'crashed')
+            if (closed) return
+            await sleep(backoffDelayMs(attempt))
+            attempt += 1
+          }
+        }
+      })()
     },
     close() {
       if (closed) return

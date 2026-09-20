@@ -80,6 +80,8 @@ export interface ZcodeConnectorDeps {
   now(): number
   /** true = follow mode: only the last user-interacted session drives the pet. */
   isFollowEnabled?(): boolean
+  /** Cross-connector follow arbitration (see HookConnectorDeps). */
+  onFocusAcquired?: HookConnectorDeps<ZcodeHookKind>['onFocusAcquired']
   /**
    * Phase 10 stats ledger (optional so pre-Phase-10 tests/wiring stay valid).
    * Recording happens BEFORE the follow gate: background sessions keep full
@@ -91,6 +93,7 @@ export interface ZcodeConnectorDeps {
 
 export interface ZcodeConnector {
   handle(input: ZcodeHookInput): void
+  retireFollowTarget(): void
   status(): ZcodeConnectorStatus
   reset(): void
   dispose(): void

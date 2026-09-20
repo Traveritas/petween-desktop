@@ -55,6 +55,7 @@ export type CcConnectorStatus = {
 
 export interface CcConnector {
   handle(input: { kind: CcHookKind; sessionId: string; payload?: CcHookPayload }): void
+  retireFollowTarget(): void
   status(): CcConnectorStatus
   reset(): void
   dispose(): void

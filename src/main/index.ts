@@ -264,6 +264,15 @@ async function bootstrap(): Promise<void> {
   // Phase 10: the stats ledger (thinking time + edit line counts) sits behind
   // the connector and serves the HUD companion via /api/petween-desktop/stats.
   const statsLedger = createStatsLedger({ now: () => Date.now() })
+  // Cross-connector follow arbitration (v0.7.0 backlog): when any connector
+  // acquires a follow target, the others retire theirs — otherwise two CLIs
+  // in follow mode both drive the pet and it flips faces between them.
+  const followPeers = new Map<string, { retireFollowTarget(): void }>()
+  const acquireFollow = (self: string) => (sessionId: string): void => {
+    for (const [id, connector] of followPeers) {
+      if (id !== self) connector.retireFollowTarget()
+    }
+  }
   const zcodePaths: ZcodeHooksPaths = {
     cfgDir: join(app.getPath('userData'), 'zcode-hooks'),
     zcodeConfigPath: join(homedir(), '.zcode', 'cli', 'config.json'),
@@ -272,9 +281,11 @@ async function bootstrap(): Promise<void> {
     relay: server.relay,
     now: () => Date.now(),
     isFollowEnabled: () => settingsStore?.get().connectors.zcode.followLatestUser ?? false,
+    onFocusAcquired: acquireFollow('zcode'),
     stats: statsLedger,
     log: (message) => console.log(message),
   })
+  followPeers.set('zcode', zcodeConnector)
   registerStatsRoutes({ webServer: server.webServer }, { snapshot: (since) => statsLedger.snapshot(since) })
   // Phase 10 second batch: reply-text previews from the zcode rollout files
   // (on-demand read, truncated at the source — the one content-level channel).
@@ -320,9 +331,11 @@ async function bootstrap(): Promise<void> {
     relay: server.relay,
     now: () => Date.now(),
     isFollowEnabled: () => settingsStore?.get().connectors.cc.followLatestUser ?? false,
+    onFocusAcquired: acquireFollow('cc'),
     stats: statsLedger,
     log: (message) => console.log(message),
   })
+  followPeers.set('cc', ccConnector)
   const ccEnabled = (): boolean => settingsStore?.get().connectors.cc.enabled ?? true
   const syncCcCfgFiles = (): Promise<void> => {
     if (!ccEnabled() || server === null) return Promise.resolve()
@@ -369,9 +382,11 @@ async function bootstrap(): Promise<void> {
     relay: server.relay,
     now: () => Date.now(),
     isFollowEnabled: () => settingsStore?.get().connectors.codex.followLatestUser ?? false,
+    onFocusAcquired: acquireFollow('codex'),
     stats: statsLedger,
     log: (message) => console.log(message),
   })
+  followPeers.set('codex', codexConnector)
   const codexEnabled = (): boolean => settingsStore?.get().connectors.codex.enabled ?? true
   const syncCodexCfgFiles = (): Promise<void> => {
     if (!codexEnabled() || server === null) return Promise.resolve()

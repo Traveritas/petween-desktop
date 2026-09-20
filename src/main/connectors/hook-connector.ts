@@ -77,6 +77,12 @@ export interface HookConnectorDeps<K extends string> {
   now(): number
   /** true = follow mode: only the last user-interacted session drives the pet. */
   isFollowEnabled?(): boolean
+  /**
+   * Follow arbitration (v0.7.0 backlog): called whenever this connector's
+   * follow target is SET — the host uses it to retire the other connectors'
+   * targets so two CLIs in follow mode don't fight over the pet's face.
+   */
+  onFocusAcquired?: (sessionId: string) => void
   /** Stats ledger (optional so pre-Phase-10 tests/wiring stay valid). */
   stats?: StatsLedger
   log?: (message: string) => void
@@ -85,6 +91,12 @@ export interface HookConnectorDeps<K extends string> {
 export interface HookConnector<K extends string> {
   handle(input: { kind: K; sessionId: string; payload?: HookPayload }): void
   status(): HookConnectorStatus<K>
+  /**
+   * Retire the current follow target (idle emission + clear) — the
+   * cross-connector arbiter's lever: another CLI just acquired the user's
+   * focus. No-op without a target.
+   */
+  retireFollowTarget(): void
   /**
    * Drop every live session WITH the dispose emissions — the disable-in-
    * settings semantics: the pet must release the agent's sessions and the
@@ -215,6 +227,9 @@ export function createHookConnector<K extends string>(
               deps.relay.emitAgentStatus(previous, 'idle')
               deps.log?.(`[${profile.logTag}] follow ${sessionId} (was ${previous})`)
             }
+            // Cross-connector arbitration hook: the host retires the OTHER
+            // connectors' follow targets so two CLIs don't both drive the pet.
+            deps.onFocusAcquired?.(sessionId)
             // Replay the new target's last visual only when it differs from
             // this event — the event itself is emitted below, so the switch
             // both reflects history and applies the current event (a gated
@@ -244,6 +259,16 @@ export function createHookConnector<K extends string>(
     },
 
     status: () => ({ ...status }),
+
+    retireFollowTarget() {
+      if (status.followTarget === null) return
+      const target = status.followTarget
+      status.followTarget = null
+      // Same retire emission a same-connector switch performs: rank-0 idle so
+      // the released session can no longer suppress anything in the aggregate.
+      deps.relay.emitAgentStatus(target, 'idle')
+      deps.log?.(`[${profile.logTag}] follow target retired (${target})`)
+    },
 
     reset() {
       for (const [sessionId, state] of sessions) {

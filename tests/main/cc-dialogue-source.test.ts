@@ -148,4 +148,18 @@ describe('createCcDialogueSource', () => {
       expect(await source.latestReply(SESSION)).toBeNull()
     })
   })
+
+  it('rejects traversal, sibling-prefix, UNC and accepts only real projects paths', async () => {
+    await withProjects(async ({ claudeDir, file }) => {
+      const source = createCcDialogueSource({ claudeDir: () => claudeDir, now: () => 1 })
+      const hostile = [
+        file.replace(/prompt/, 'x') + '/../../../Windows/win.ini', // traversal escapes the root after resolve folds
+        file.replace(/projects/, 'projects-evil'), // sibling-prefix must NOT match
+        String.raw`\\server\share\projects\x.jsonl`, // UNC
+      ]
+      for (const bad of hostile) source.noteTranscript(SESSION, bad)
+      // All rejected → falls to scan → finds the real file.
+      expect((await source.latestReply(SESSION))?.turnId).toBe('prompt_5')
+    })
+  })
 })

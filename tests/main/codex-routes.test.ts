@@ -44,6 +44,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await new Promise((resolve) => server.close(resolve))
   onHookEvent.mockClear()
+  isEnabled.mockClear()
+  connectorStatus.mockClear()
   installHooks.mockClear()
   uninstallHooks.mockClear()
 })

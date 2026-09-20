@@ -116,4 +116,22 @@ describe('createCodexDialogueSource', () => {
       expect(await capped.latestReply(SESSION)).toBeNull() // the big response_line blows the cap
     })
   })
+
+  it('rejects traversal, sibling-prefix, UNC; lowercase drive accepted', async () => {
+    await withSessions(async ({ codexDir, file }) => {
+      const source = createCodexDialogueSource({ codexDir: () => codexDir, now: () => 1 })
+      const hostile = [
+        // 5 levels up: file→day→month→year→sessions→codexDir (escapes the root).
+        file.replace(/rollout/, 'x') + '/../../../../../Windows/win.ini',
+        file.replace(/sessions/, 'sessions-evil'),
+        String.raw`\server\share\sessions\x.jsonl`,
+      ]
+      for (const bad of hostile) source.noteTranscript(SESSION, bad)
+      expect((await source.latestReply(SESSION))?.turnId).toBe('turn_5') // scan still finds the real file
+      // Lowercase drive letter form of the real path is accepted (case-insensitive compare).
+      const lowered = file.slice(0, 1).toLowerCase() + file.slice(1)
+      source.noteTranscript(SESSION, lowered)
+      expect((await source.latestReply(SESSION))?.turnId).toBe('turn_5')
+    })
+  })
 })

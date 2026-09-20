@@ -52,6 +52,7 @@ export type CodexConnectorStatus = {
 
 export interface CodexConnector {
   handle(input: { kind: CodexHookKind; sessionId: string; payload?: CodexHookPayload }): void
+  retireFollowTarget(): void
   status(): CodexConnectorStatus
   reset(): void
   dispose(): void
