@@ -55,4 +55,4 @@ cd ../.. && pnpm install && pnpm dev
 
 ## 许可
 
-[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans)：自由使用、修改、二次开发与分发，**须署名（Petween Desktop by Traveritas）、非商业性使用、衍生作品以同协议开源**。商用请先联系作者获得授权。
+[AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html)：自由使用、修改、二次开发与分发（含商业渠道），**衍生作品必须以同协议开源**并保留署名。与 clawd-on-desk、LingChat 等同类桌宠项目一致。
