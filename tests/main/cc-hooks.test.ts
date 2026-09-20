@@ -94,11 +94,10 @@ describe('buildCcHookEvents', () => {
     }
   })
 
-  it('covers the CC event surface; failure shares the post-tool cfg, notification shares permission', () => {
+  it('covers the CC event surface; failure shares the post-tool cfg; Notification is NOT registered', () => {
     const events = buildCcHookEvents(CFG_DIR)
     expect(Object.keys(events).sort()).toEqual(
       [
-        'Notification',
         'PermissionRequest',
         'PostToolUse',
         'PostToolUseFailure',
@@ -112,9 +111,7 @@ describe('buildCcHookEvents', () => {
     const post = (events.PostToolUse[0].hooks ?? [])[0] as { args: string[] }
     const failure = (events.PostToolUseFailure[0].hooks ?? [])[0] as { args: string[] }
     expect(post.args[1]).toBe(failure.args[1])
-    const permission = (events.PermissionRequest[0].hooks ?? [])[0] as { args: string[] }
-    const notification = (events.Notification[0].hooks ?? [])[0] as { args: string[] }
-    expect(permission.args[1]).toBe(notification.args[1])
+    expect(events.Notification).toBeUndefined() // post-turn idle nudges must not pollute the success face
     expect(events.SessionEnd[0].matcher).toBeUndefined()
   })
 })

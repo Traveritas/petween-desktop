@@ -44,10 +44,11 @@ const CC_EVENTS: ReadonlyArray<{ kind: CcHookKind; event: string; matcher?: stri
   { kind: 'pre-tool-other', event: 'PreToolUse', matcher: '^(?!(?:Edit|Write|MultiEdit|NotebookEdit|Bash)$)' },
   { kind: 'post-tool', event: 'PostToolUse' },
   { kind: 'post-tool', event: 'PostToolUseFailure' },
-  // Both map onto the waiting visual: PermissionRequest = approval prompt,
-  // Notification = "waiting for your input" idle nudge.
+  // PermissionRequest ONLY: Notification also fires for the post-turn
+  // "waiting for your input" idle nudge, which polluted the success face
+  // with a phantom waiting face a minute after turn end (real-machine
+  // ledger evidence 2026-09-20; the documented docs/07 §6.2 remedy).
   { kind: 'permission-request', event: 'PermissionRequest' },
-  { kind: 'permission-request', event: 'Notification' },
   { kind: 'stop', event: 'Stop' },
   { kind: 'session-end', event: 'SessionEnd' },
 ]

@@ -33,13 +33,13 @@ zcode-connector/zcode-hooks/zcode-routes 重构为这些模块的薄壳，**行�
 | PreToolUse | `^(?!(?:Edit\|Write\|MultiEdit\|NotebookEdit\|Bash)$)` | pre-tool-other | tool/call name=read | working |
 | PostToolUse / PostToolUseFailure | — | post-tool | tool/result | thinking |
 | PermissionRequest | — | permission-request | approval/asked | waiting |
-| Notification | — | permission-request（共用） | approval/asked | waiting |
+| Notification | **不注册**（真机实证 2026-09-20） | — | — | — |
 | Stop | — | stop | turn/end completed | success |
 | SessionEnd | — | **session-end** | （无视觉——直接 dispose） | — |
 
 要点：
 
-- **PermissionRequest 与 Notification 共用 `permission-request` kind**（同一 cfg 文件）：前者是授权提示，后者是「等待你的输入」的闲置提示，waiting 视觉对两者都成立。等待 10min 衰减兜底同 zcode。
+- ~~**PermissionRequest 与 Notification 共用 `permission-request` kind**~~（真机推翻：回合成功后约一分钟 CC 发 Notification「waiting for your input」闲置提示 → 宠物从 success 脸翻成等待授权脸（ledger 事件序列坐实：`11:57:01 success → 11:58:01 waiting`，之间无任何用户操作）——已按 §6.2 预案摘除 Notification 注册，只留 PermissionRequest；闲置等待由 success 60s 衰减自然覆盖）。
 - **session-end 是 CC 独有 kind**（zcode 没有 SessionEnd）：引擎在清定时器后立即 dispose（emitSessionDisposed + 账本行清除 + followTarget 摘除），**排在排惰性 dispose 定时器之前**（否则残留定时器会在死会话上二次 dispose——已修并有用例钉住）。30min 惰性 watchdog 仍保留，覆盖 CC 崩溃路径。
 - Subagent/Task/Teammate 系事件不注册：子代理载荷带 `agent_id`，事件与主会话同 session_id，注册只会制造噪音。
 - `prompt_id` 作 turnId：user-prompt-submit 开账本回合（recordTurnStart）、stop 的 state fact 携带（回合差值结算用）——与 zcode 的 turnId 语义一致。
@@ -64,7 +64,7 @@ CC stdin 解析（`parseCcHookBody`）：只收 JSON（无 legacy 世代）；`s
 ## 6. 观察项 / 已知风险（真机验证清单）
 
 1. **负向前瞻 matcher 的锚定语义**（同 docs/06 §7.1）：`^(?!...$)` 假设 CC 用裸 `RegExp.test`。官方文档已写明「含正则字符 → 不锚定 RegExp.test」，风险低但未实测——症状同 zcode：Read/Grep 等工具期间宠物无工作表情。修正 = 换省略 matcher 的单条通用注册。
-2. **Notification 的触发面**：文档截断未拿到完整字段表；若 Notification 还在不合适的时机触发（如自动授权通知），waiting 视觉可能偏多——真机观察，必要时从注册表里摘掉 Notification 只留 PermissionRequest。
+2. ~~**Notification 的触发面**~~（✅ 已实证并处理，见 §3 要点：回合后闲置提示污染 success 脸——摘除注册）。
 3. **SessionEnd 的 1.5s 预算**：回环 curl 实测毫秒级，但极端情况下（本服务正忙）hook 可能被掐——30min watchdog 兜底，无正确性风险。
 4. **stats 泡泡的回合口径**：CC 的 stop 一定带 `prompt_id`；若某事件缺失 turnId（版本差异），账本按无 turnId 容忍（回合差值退化为会话累计基线），泡泡照出只是精度略降。
 5. ~~**对话泡泡（回复摘要）后置**~~（✅ 同日解绑批落地，见 §9）：CC 载荷带 `transcript_path`（`~/.claude/projects/<cwd-slug>/<session-id>.jsonl`）。
