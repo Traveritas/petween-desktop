@@ -653,3 +653,46 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 ### 里程碑动作
 
 版本 0.6.4 → 0.7.0，打标签 `v0.7.0`。
+
+## Phase 17：roamer companion——宠物自主行为（游荡 / 待机动作 / 捣乱）（2026-09-21 代码完成；真机验收待用户）
+
+用户需求：宠物在闲时（可配置成永远）自己游荡；从桌面外拉出可自定义随机内容池的窗口（借鉴 Mac 的 Desktop Goose）；捣乱；外加待机小动作。**待机、游走、捣乱各类内的子功能均独立开关。** 经两轮子智能体代码级调研（companion API 能力面 / 装配级细节）后拍板方案并四批交付。
+
+### 设计决策（评审后定案）
+
+1. **零 petween core 改动**。全部能力走 `petween/client` 扩展面：`requestPositionControl()`（60fps 位置租约）、`flashPose/flashAsset`（临时换图）、`registerPoses`、`playAnimation`（loop/once，实例可 dispose）、`subscribeStage/subscribeUserDrag`。上游零回流、零 submodule bump。
+2. **in-tree companion**（`src/renderer/companions/roamer/`，照 stats-hud 模式），不建独立仓库（2026-09-21 用户问询后确认）：迁移路径已被 physics 验证（目录自包含 + 只依赖扩展面类型 + 结构镜像 DesktopCompanion），触发信号 = DSH 端需要 roamer 的那天，迁移时补一个 config hub（physics 模板）。
+3. **明确排除**：输入类捣乱（抢鼠标/拖系统窗——overlay 不可聚焦 + WH_MOUSE_LL 常驻钩子闪光标坑族）；拉出的内容窗不可交互（可点击需扩穿透三态协议三处，触发式后置）。
+4. **姿势美术不随插件发行**（通用图与用户自定义宠物形象冲突）：默认表现 = 纯 motion 动画（无图也成立）；设置卡支持每行为上传自定义图覆盖（走现有 `POST /api/petween/assets`，URL 存 options）。**朝向镜像砍掉**：pose 通道 `zoom` 校验域 0.2..8 无负值，无法水平翻转（计划预案兑现）；peek 用「向边缘外倾身」的 motion 偏移替代，无需姿势。
+5. **架构**：纯决策引擎（`engine.ts`，事件→命令，rng 可注入，node 直测）+ 薄 runtime（`companion.ts`，租约/rAF/视觉解释器）+ DOM 层（`windows.ts`，bubble-host 骨架）+ host 装配（`roamer-assembly.ts`：默认动画幂等注册，无路由无 store，builder/proxy 零改动）。
+
+### 交付明细（四批提交）
+
+- **批 1 骨架+游走**：引擎门控（idle-only/always、总开关、dragging、reducedMotion）+ 租约纪律（**仅走 leg 期间持有 PositionDriver，与 physics 抛掷互让**：lease null → 顺延 3s 重试；drag start 弃 leg 不 commit；hidden settle；会话丢失全释放并重新 arm）+ 常速 rAF 走 leg + `user:roamer-walk-bob` loop 动画 + 走路姿势覆盖（flashAsset holdMs=leg 时长+500ms，中途打断用「重闪当前状态槽位 1ms」还原技巧）+ 设置卡游走区。
+- **批 2 待机动作**：doze/lookAround/sway/shake 四动作（默认 once 动画：瞌睡点头/左右张望/晃悠/抖毛；doze/lookAround 可传自定义图）+ 引擎 idle-action 占用模式（与游走共享 when 门控与 autonomy 前置；`userDragging` 标志闭合 drag 事件与 snapshot.dragging 的竞态）。
+- **批 3 拉窗+便签+内容池**：mischief 决策层（优先级 mischief > wander > idle）+ 拉窗 = 走到最近屏幕边缘后从边缘外滑入内容窗（DOM 不受 §27 钳制；**任何弃 leg 路径静默丢弃载荷——绝不向拖拽中/隐藏窗口 spawn**）+ 便签 = 原地抖毛 + 随机倾斜贴纸（停留 90s vs 拉窗 25s）+ windows.ts DOM 层（fixed 全屏 pointer-events:none、z-index 低于泡泡层、enter/exit CSS class + 定时器移除、dispose 清场）+ 设置卡捣乱区与内容池管理（图片上传/文本添加/删除，存 `companions.options['roamer']`）。
+- **批 4 冲过+探头**：dashAcross = 4× 速度冲到对侧（无需内容池）；edgePeek = 走到边缘后向屏幕外倾身（transition.x 视觉偏移，左右两方向动画）+ peek 占用模式；内容池空检查收窄到需要内容的动作。
+
+### 关键语义
+
+- 决策优先级：mischief > wander > idle；三类共享 autonomy 门控（会话可用 + 非拖拽 + 非 reducedMotion + when 模式：idle-only 要求 visualState==='idle'，always 任意状态但姿势仍显示工作状态）。
+- 所有打断路径（drag/hidden/会话丢失/grace 阀）统一「弃则不 commit、完成则 commit 后 release（release 必须晚于 commit 落地，20s 超时兜底）」；endWalk 一律从结束时刻重排暂停（修复批 1 测试抓到的「过期 nextWanderAt 立即再走」bug）。
+- 选项轮询 3s（stats-hud pullOptions 模式，改设置不重挂）；`normalizeRoamerOptions` 双侧共用（卡片与 runtime 同源）。
+
+### 测试（375 → 413，+38）
+
+`tests/companions/roamer-engine.test.ts`（node，28 用例：游走生命周期/门控矩阵/打断/租约拒绝重试/会话重建/grace 阀/待机调度与取消/mischief 四动作/池空静默/normalize）；`tests/companions/roamer-windows.test.ts`（jsdom + fake timers，8 用例：拉窗左右边缘定位与滑入类/便签皮肤与停留差/DOM 移除时序/dispose 清场）；`tests/main/roamer-assembly.test.ts`（真 route table + host service，3 用例：注册落地/幂等/不覆盖用户编辑）。
+
+### 待用户真机验收清单
+
+1. 闲时 ~6s 后开走，速度/节奏/边界行为（下三分之一偏置、整只宠物不出屏）；设置改速度/间隔 3s 内生效。
+2. 拖住宠物立即停且不弹回；扔出（physics）期间 roamer 不抢租约，落地后恢复决策。
+3. 「永远」模式下 agent thinking 时宠物照走、姿势仍为工作状态；idle-only 下忙碌不动。
+4. 待机动作按间隔出现（打盹 2.6s/张望 1.8s/晃悠 2.2s/抖毛 0.7s），拖拽立即收。
+5. 内容池加一张图 + 一条文本 → 捣乱触发时拉窗从宠物所在边缘滑入、25s 淡出；便签随机位置 ~90s。
+6. 各级开关独立生效（关游走走停、关单动作只跳过该动作、关捣乱无窗口）；关插件整体（设置→插件）行为全停、已有窗口清场。
+7. 打包版抽查（`pnpm dist:win`）同验。
+
+### 后置项（backlog）
+
+- 便签/拉窗位置避让（当前随机带不避任务栏/宠物本体）；拉窗可交互化（穿透协议三处扩展）；姿势覆盖的上传入口 UI（当前仅 options 直写，批 3 卡片已有内容池上传、行为姿势上传未做卡片控件）；走路朝向（需上游开 pose 镜像缝，回流项）；多显示器游走（overlay 仅主屏的既有约束）；便签文本池与拉窗池分离。
