@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   buildCodexHookEvents,
+  classifyCodexToolKind,
   installCodexHooks,
   renderCodexCurlConfig,
   uninstallCodexHooks,
@@ -72,33 +73,46 @@ describe('cfg rendering', () => {
 describe('buildCodexHookEvents', () => {
   it('uses command STRINGS with the quoted cfg path, stdin forwarding and SECONDS timeout', () => {
     const events = buildCodexHookEvents(CFG_DIR)
+    // ONE bare (match-all) PreToolUse group — no matchers at all: Codex
+    // compiles them with the Rust regex crate (no look-around), so the
+    // CC-style "everything else" pattern is rejected; classification moved
+    // to the route (classifyCodexToolKind).
     const pre = events.PreToolUse
-    expect(pre).toHaveLength(3)
-    expect(pre.map((group) => group.matcher)).toEqual([
-      'apply_patch|write_file|Edit|Write|MultiEdit|NotebookEdit',
-      'shell|Bash|local_shell|shell_command|exec_command',
-      '^(?!(?:apply_patch|write_file|Edit|Write|MultiEdit|NotebookEdit|shell|Bash|local_shell|shell_command|exec_command)$)',
-    ])
-    for (const [index, group] of pre.entries()) {
-      const hook = (group.hooks ?? [])[0] as Record<string, unknown>
-      expect(hook.type).toBe('command')
-      expect(hook.timeout).toBe(5) // seconds
-      // cmd.exe /C command line: the cfg path is quoted in place; each
-      // matcher group carries its own kind's cfg.
-      const kind = ['pre-tool-edit', 'pre-tool-command', 'pre-tool-other'][index]
-      expect(hook.command).toBe(`curl.exe --config "${CFG_DIR}/${kind}.cfg" --data-binary @-`)
-    }
+    expect(pre).toHaveLength(1)
+    expect(pre[0].matcher).toBeUndefined()
+    const hook = (pre[0].hooks ?? [])[0] as Record<string, unknown>
+    expect(hook.type).toBe('command')
+    expect(hook.timeout).toBe(5) // seconds
+    expect(hook.command).toBe(`curl.exe --config "${CFG_DIR}/pre-tool-other.cfg" --data-binary @-`)
   })
 
-  it('covers the Codex event surface; Interrupt shares the session-start cfg', () => {
+  it('covers the Codex event surface; Interrupt shares the session-start cfg; clamp-capped events set timeout 3', () => {
     const events = buildCodexHookEvents(CFG_DIR)
     expect(Object.keys(events).sort()).toEqual(
       ['Interrupt', 'PermissionRequest', 'PostToolUse', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
     )
-    const start = (events.SessionStart[0].hooks ?? [])[0] as { command: string }
-    const interrupt = (events.Interrupt[0].hooks ?? [])[0] as { command: string }
+    const start = (events.SessionStart[0].hooks ?? [])[0] as { command: string; timeout: number }
+    const interrupt = (events.Interrupt[0].hooks ?? [])[0] as { command: string; timeout: number }
     expect(interrupt.command).toBe(start.command) // same cfg, same idle visual
-    expect(events.PreToolUse[0].matcher).not.toBeUndefined()
+    // Codex clamps SessionEnd/Interrupt to 3s — we set 3 so no startup warning.
+    expect(interrupt.timeout).toBe(3)
+    expect((events.SessionEnd[0].hooks ?? [])[0].timeout).toBe(3)
+  })
+})
+
+describe('classifyCodexToolKind', () => {
+  it('classifies by the real tool_name (Codex-native + CC aliases), unknown falls to other', () => {
+    expect(classifyCodexToolKind('apply_patch')).toBe('pre-tool-edit')
+    expect(classifyCodexToolKind('write_file')).toBe('pre-tool-edit')
+    expect(classifyCodexToolKind('Write')).toBe('pre-tool-edit')
+    expect(classifyCodexToolKind('MultiEdit')).toBe('pre-tool-edit')
+    expect(classifyCodexToolKind('shell')).toBe('pre-tool-command')
+    expect(classifyCodexToolKind('Bash')).toBe('pre-tool-command')
+    expect(classifyCodexToolKind('local_shell')).toBe('pre-tool-command')
+    expect(classifyCodexToolKind('read_file')).toBe('pre-tool-other')
+    expect(classifyCodexToolKind('grep')).toBe('pre-tool-other')
+    expect(classifyCodexToolKind('WebSearch')).toBe('pre-tool-other')
+    expect(classifyCodexToolKind(undefined)).toBe('pre-tool-other')
   })
 })
 
@@ -129,7 +143,7 @@ describe('install', () => {
       await installCodexHooks(paths(hooksPath))
       const config = JSON.parse(await readFile(hooksPath, 'utf8'))
       const pre = config.hooks.PreToolUse
-      expect(pre).toHaveLength(4) // 1 foreign + 3 ours
+      expect(pre).toHaveLength(2) // 1 foreign + our single bare group
       expect(pre[0].matcher).toBe('Bash|apply_patch')
       expect(pre[0].hooks[0].command).toBe('deja.exe hook-tool')
       const start = config.hooks.SessionStart
@@ -143,7 +157,7 @@ describe('install', () => {
       await installCodexHooks(paths(hooksPath))
       await installCodexHooks(paths(hooksPath))
       let config = JSON.parse(await readFile(hooksPath, 'utf8'))
-      expect(config.hooks.PreToolUse).toHaveLength(3)
+      expect(config.hooks.PreToolUse).toHaveLength(1)
       expect(config.hooks.Interrupt).toHaveLength(1)
       expect(await readFile(`${hooksPath}.petween-bak`, 'utf8')).toBeDefined()
 

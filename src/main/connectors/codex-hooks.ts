@@ -31,34 +31,42 @@ import { readConfigObject, removeBackup, serializedWrite, writeConfigAtomic } fr
 import type { CodexHookKind } from './codex-connector'
 
 /**
- * Codex event registrations. Tool names: Codex-native (`apply_patch`,
- * `write_file`, `shell`, `read_file`, …) plus the CC-compat aliases the
- * engine's matcher_aliases accept (`Edit`/`Write`/`Bash`) — the unions
- * stay plain-charset so matching is exact-list, and the "everything else"
- * lookahead is the same anchored-negation pattern CC/zcode use.
+ * Codex event registrations. NO PreToolUse matchers: Codex compiles matchers
+ * with the Rust regex crate, which does NOT support look-around — the
+ * negative-lookahead "everything else" pattern from the CC/zcode family is
+ * rejected outright (real-machine report 2026-09-20). Instead ONE bare
+ * (match-all) PreToolUse group posts every tool event, and the ROUTE
+ * reclassifies edit/command/other from the payload's tool_name — our own TS
+ * unions are the single source of truth, immune to matcher-semantics drift.
+ *
+ * SessionEnd/Interrupt events have their timeout clamped to 3s by Codex —
+ * we set 3 up front so no clamp warning fires at startup.
  */
-const CODEX_EVENTS: ReadonlyArray<{ kind: CodexHookKind; event: string; matcher?: string }> = [
+const CODEX_EVENTS: ReadonlyArray<{ kind: CodexHookKind; event: string; timeout?: number }> = [
   { kind: 'session-start', event: 'SessionStart' },
   { kind: 'user-prompt-submit', event: 'UserPromptSubmit' },
-  {
-    kind: 'pre-tool-edit',
-    event: 'PreToolUse',
-    matcher: 'apply_patch|write_file|Edit|Write|MultiEdit|NotebookEdit',
-  },
-  { kind: 'pre-tool-command', event: 'PreToolUse', matcher: 'shell|Bash|local_shell|shell_command|exec_command' },
-  {
-    kind: 'pre-tool-other',
-    event: 'PreToolUse',
-    matcher: '^(?!(?:apply_patch|write_file|Edit|Write|MultiEdit|NotebookEdit|shell|Bash|local_shell|shell_command|exec_command)$)',
-  },
+  // Catch-all: the route reclassifies per tool_name (see classifyCodexToolKind).
+  { kind: 'pre-tool-other', event: 'PreToolUse' },
   { kind: 'post-tool', event: 'PostToolUse' },
   { kind: 'permission-request', event: 'PermissionRequest' },
   { kind: 'stop', event: 'Stop' },
   // A user interrupt aborts the turn — the immediate idle baseline (without
   // this the pet would work-face until the 30min watchdog).
-  { kind: 'session-start', event: 'Interrupt' },
-  { kind: 'session-end', event: 'SessionEnd' },
+  { kind: 'session-start', event: 'Interrupt', timeout: 3 },
+  { kind: 'session-end', event: 'SessionEnd', timeout: 3 },
 ]
+
+/** Edit-class tool names (Codex-native + the CC-compat aliases). */
+export const CODEX_EDIT_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'write_file', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+/** Command-class tool names (Codex-native + the CC-compat aliases). */
+export const CODEX_COMMAND_TOOLS: ReadonlySet<string> = new Set(['shell', 'Bash', 'local_shell', 'shell_command', 'exec_command'])
+
+/** Route-side classification of a PreToolUse payload by its real tool_name. */
+export function classifyCodexToolKind(toolName: string | undefined): CodexHookKind {
+  if (toolName !== undefined && CODEX_EDIT_TOOLS.has(toolName)) return 'pre-tool-edit'
+  if (toolName !== undefined && CODEX_COMMAND_TOOLS.has(toolName)) return 'pre-tool-command'
+  return 'pre-tool-other'
+}
 
 /** The endpoint hooks POST to (registered in codex-routes.ts). */
 export const CODEX_EVENT_PATH = '/api/petween-desktop/connector/codex/event'
@@ -101,23 +109,24 @@ type HookEntry = { type?: string; command?: string; timeout?: number; statusMess
 type MatcherGroup = { matcher?: string; hooks?: HookEntry[] }
 
 /**
- * One hook invocation: Codex runs the command STRING through cmd.exe /C on
- * Windows, so the cfg path is double-quoted in place (a username with spaces
- * must not split the line). stdin carries the event JSON (--data-binary @-).
+ * One hook invocation: Codex runs the command STRING through bash/cmd on
+ * Windows, so the cfg path is double-quoted in place with FORWARD slashes
+ * (backslash paths get eaten by bash — the deja-vu failure mode). stdin
+ * carries the event JSON (--data-binary @-). Timeout is seconds.
  */
-function hookFor(cfgDir: string, kind: CodexHookKind): HookEntry {
+function hookFor(cfgDir: string, kind: CodexHookKind, timeout = 5): HookEntry {
   return {
     type: 'command',
     command: `curl.exe --config "${normalizeCfgPath(cfgDir)}/${cfgFileName(kind)}" --data-binary @-`,
-    timeout: 5,
+    timeout,
   }
 }
 
 /** The top-level hooks object to merge into hooks.json. */
 export function buildCodexHookEvents(cfgDir: string): Record<string, MatcherGroup[]> {
   const merged: Record<string, MatcherGroup[]> = {}
-  for (const { kind, event, matcher } of CODEX_EVENTS) {
-    const group: MatcherGroup = matcher === undefined ? { hooks: [hookFor(cfgDir, kind)] } : { matcher, hooks: [hookFor(cfgDir, kind)] }
+  for (const { kind, event, timeout } of CODEX_EVENTS) {
+    const group: MatcherGroup = { hooks: [hookFor(cfgDir, kind, timeout)] }
     merged[event] = [...(merged[event] ?? []), group]
   }
   return merged

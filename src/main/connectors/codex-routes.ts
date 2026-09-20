@@ -14,6 +14,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readBody, registerExactRoutes, rejectsCrossOriginWrite, sendJson } from './route-helpers'
 import { CODEX_HOOK_KINDS, type CodexConnectorStatus, type CodexHookKind, type CodexHookPayload } from './codex-connector'
+import { classifyCodexToolKind } from './codex-hooks'
 
 export interface CodexConnectorRoutesDeps {
   /** False when the connector is disabled in settings — events are dropped. */
@@ -121,7 +122,15 @@ export function registerCodexConnectorRoutes(
               sendJson(res, 400, { error: { code: 'BAD_REQUEST', message: 'invalid session id' } })
               return
             }
-            if (deps.isEnabled()) deps.onHookEvent({ kind: kind as CodexHookKind, sessionId, ...(payload === undefined ? {} : { payload }) })
+            // Codex matchers are Rust regex (no look-around — the CC-style
+            // "everything else" pattern is rejected), so PreToolUse registers
+            // as ONE bare group and classification happens HERE, from the
+            // payload's real tool_name (codex-hooks owns the unions).
+            let effectiveKind = kind as CodexHookKind
+            if (effectiveKind === 'pre-tool-other' && payload?.toolName !== undefined) {
+              effectiveKind = classifyCodexToolKind(payload.toolName)
+            }
+            if (deps.isEnabled()) deps.onHookEvent({ kind: effectiveKind, sessionId, ...(payload === undefined ? {} : { payload }) })
             res.writeHead(204)
             res.end()
           },

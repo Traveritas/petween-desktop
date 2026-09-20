@@ -9,24 +9,22 @@
 3. **timeout 单位秒**；我们写 5。
 4. **stdin 载荷**（schema.rs，snake_case）：公共 `session_id` / **`turn_id`** / `transcript_path`（可 null——`disable_response_storage` 下可能缺席）/ `cwd` / `hook_event_name` / `model` / `permission_mode`；工具事件加 `tool_name` / `tool_input`（+`tool_response`/`tool_use_id`）。**`turn_id` 是官方回合 id，直接作账本 turnId**（比 CC 的 prompt_id 推导还直接）。
 5. **信任机制**：Codex 对每个 (event, matcher, group) 算哈希并与受信存储比对——**安装后 Codex 会请求一次信任确认**（`bypass_hook_trust` 托管策略存在但不归我们碰）。设置卡文案已注明。
-6. **matcher 语义**：CC 族（纯字符集=精确/`|` 列表，含正则字符=不锚定 RegExp.test）。
+6. **matcher 语义（真机修正 2026-09-20）**：Codex 用 **Rust regex crate** 编译 matcher——**不支持 look-around**，CC 家族的负向前瞻「其他工具」模式直接被拒（启动警告 `invalid matcher`，该组被丢弃）。因此我们**不注册任何 PreToolUse matcher**：单个裸组（match-all）全量上报，**分类在路由边界按载荷 `tool_name` 重归类**（`classifyCodexToolKind`，工具名并集是 TS 单一事实源，免疫 matcher 语义漂移）。另：SessionEnd/Interrupt 事件超时被 Codex 钳到 3s——直接写 3 免启动警告。
 7. 事件面 12 个：比 CC 多 `Interrupt`（用户打断）、`PreCompact`/`PostCompact`/`SubagentStart/Stop`；**无 `Notification`**。
 8. `notify`（config.toml）是旧式单事件通知（本机 Pebrel 在用）——不采用，hooks.json 是正路。
 
 ## 2. 事件映射
 
-| Codex 事件 | matcher | petween kind | 说明 |
+| Codex 事件 | 注册形态 | petween kind | 说明 |
 |---|---|---|---|
 | SessionStart | — | session-start | idle 基线 / focus 信号 |
 | UserPromptSubmit | — | user-prompt-submit | thinking + turn/start |
-| PreToolUse | `apply_patch\|write_file\|Edit\|Write\|MultiEdit\|NotebookEdit` | pre-tool-edit | 原生+CC 别名并集（matcher_aliases） |
-| PreToolUse | `shell\|Bash\|local_shell\|shell_command\|exec_command` | pre-tool-command | |
-| PreToolUse | 负向前瞻（上两者之并集的补） | pre-tool-other | 同 CC/zcode 的锚定观察项 |
+| PreToolUse | **单个裸组（无 matcher）** | pre-tool-other（路由按 `tool_name` 重归类为 edit/command/other） | Rust regex 无前瞻，分类收归我方（§1.6） |
 | PostToolUse | — | post-tool | Codex 无 PostToolUseFailure |
 | PermissionRequest | — | permission-request | 原生事件 |
 | Stop | — | stop | 60s 衰减 |
-| **Interrupt** | — | **session-start** | 用户打断=立即 idle；不注册则打断后猫卡工作脸到 30min 兜底 |
-| SessionEnd | — | session-end | 即时 dispose（引擎 disposeKinds） |
+| **Interrupt** | timeout 3（钳位） | **session-start** | 用户打断=立即 idle；不注册则打断后猫卡工作脸到 30min 兜底 |
+| SessionEnd | timeout 3（钳位） | session-end | 即时 dispose（引擎 disposeKinds） |
 
 编辑行数：`apply_patch` 载荷是 patch 文本（line-count 的 countsFromPatch 分支）+ CC 形状的 Edit/Write 兜底——两种都已覆盖。
 
@@ -46,8 +44,8 @@ rollout 文件 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`，行形
 
 1. **信任确认 UX**：安装后 Codex 的信任提示具体形态未实测（文档未展开）——预期一次性确认，若体验糟糕再评估。
 2. **hooks.json 热加载未实证**（CC 是热加载，zcode 要重启）——安装后新会话生效是保守假设；若实测要重启 Codex，改设置卡文案。
-3. **matcher 锚定**：负向前瞻同 docs/06 §7.1 / docs/07 §6.1 观察项（引擎 matcher_aliases 的别名表未逐个实测；并集 matcher 已尽量宽）。
-4. **工具名漂移**：Codex 工具名随版本演进（shell/local_shell/exec_command……），matcher 并集覆盖当前已知集——漏网的落 pre-tool-other（猫仍工作脸，只有图标分类差异），无功能风险。
+3. ~~**matcher 锚定**~~（✅ 真机推翻：Rust regex 无 look-around，前瞻 matcher 直接被拒——已改为路由侧 `tool_name` 分类，见 §1.6/§2）。
+4. **工具名漂移**：路由分类的并集覆盖当前已知集——漏网的落 pre-tool-other（猫仍工作脸，只有图标分类差异），无功能风险；本机 deja-vu 的 hooks 用反斜杠路径经 bash 执行会 `command not found`（其自身问题，非我们引入——合并写保留其条目原样）。
 5. **disable_response_storage**：transcript_path 可能为 null——该会话无对话泡泡（状态/统计泡泡不受影响）。
 
 ## 7. 模块清单与测试

@@ -102,6 +102,24 @@ describe('event sink', () => {
     })
   })
 
+  it('reclassifies the bare PreToolUse group by the payload tool_name (Rust regex has no look-around)', async () => {
+    const post = async (toolName: string): Promise<string> => {
+      const res = await fetch(`${base}${EVENT}?e=pre-tool-other`, {
+        method: 'POST',
+        body: JSON.stringify({ session_id: 'codex_x', tool_name: toolName, tool_input: {} }),
+      })
+      expect(res.status).toBe(204)
+      return (onHookEvent.mock.calls.at(-1)?.[0] as { kind: string }).kind
+    }
+    expect(await post('apply_patch')).toBe('pre-tool-edit')
+    expect(await post('Bash')).toBe('pre-tool-command')
+    expect(await post('read_file')).toBe('pre-tool-other')
+    // A payload-less event stays whatever the cfg encoded.
+    const bare = await fetch(`${base}${EVENT}?e=stop`, { method: 'POST', body: JSON.stringify({ session_id: 'codex_x' }) })
+    expect(bare.status).toBe(204)
+    expect((onHookEvent.mock.calls.at(-1)?.[0] as { kind: string }).kind).toBe('stop')
+  })
+
   it('rejects unknown kinds, missing sessions and malformed ids; blocks cross-origin; 405s non-POST', async () => {
     expect((await fetch(`${base}${EVENT}?e=nonsense`, { method: 'POST', body: '{}' })).status).toBe(400)
     expect((await fetch(`${base}${EVENT}?e=stop`, { method: 'POST', body: JSON.stringify({}) })).status).toBe(400)
