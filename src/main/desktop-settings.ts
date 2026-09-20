@@ -56,6 +56,10 @@ export interface DesktopSettings {
       enabled: boolean
       followLatestUser: boolean
     }
+    codex: {
+      enabled: boolean
+      followLatestUser: boolean
+    }
   }
 }
 
@@ -81,6 +85,10 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
       followLatestUser: false,
     },
     cc: {
+      enabled: true,
+      followLatestUser: false,
+    },
+    codex: {
       enabled: true,
       followLatestUser: false,
     },
@@ -125,6 +133,7 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
   const connectors = (typeof raw.connectors === 'object' && raw.connectors !== null ? raw.connectors : {}) as Record<string, unknown>
   const zcode = (typeof connectors.zcode === 'object' && connectors.zcode !== null ? connectors.zcode : {}) as Record<string, unknown>
   const cc = (typeof connectors.cc === 'object' && connectors.cc !== null ? connectors.cc : {}) as Record<string, unknown>
+  const codex = (typeof connectors.codex === 'object' && connectors.codex !== null ? connectors.codex : {}) as Record<string, unknown>
   const mode = MODES.includes(ct.mode as ClickThroughMode) ? (ct.mode as ClickThroughMode) : 'auto'
   return {
     clickThrough: {
@@ -149,6 +158,10 @@ export function normalizeDesktopSettings(input: unknown): DesktopSettings {
       cc: {
         enabled: typeof cc.enabled === 'boolean' ? cc.enabled : true,
         followLatestUser: typeof cc.followLatestUser === 'boolean' ? cc.followLatestUser : false,
+      },
+      codex: {
+        enabled: typeof codex.enabled === 'boolean' ? codex.enabled : true,
+        followLatestUser: typeof codex.followLatestUser === 'boolean' ? codex.followLatestUser : false,
       },
     },
   }
@@ -254,6 +267,10 @@ export async function createDesktopSettingsStore(filePath: string): Promise<Desk
           cc: {
             ...(settings.connectors.cc as unknown as Record<string, unknown>),
             ...((patch as { connectors?: { cc?: Record<string, unknown> } })?.connectors?.cc ?? {}),
+          },
+          codex: {
+            ...(settings.connectors.codex as unknown as Record<string, unknown>),
+            ...((patch as { connectors?: { codex?: Record<string, unknown> } })?.connectors?.codex ?? {}),
           },
         },
       }

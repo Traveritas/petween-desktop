@@ -16,6 +16,7 @@ import { openAnimatorWindow } from './animator-window'
 import { DEV_LOCAL_PORT } from './dev-port'
 import { createZcodeConnector } from './connectors/zcode-connector'
 import { createCcConnector } from './connectors/cc-connector'
+import { createCodexConnector } from './connectors/codex-connector'
 import {
   installCcHooks,
   uninstallCcHooks,
@@ -24,6 +25,15 @@ import {
   type CcHooksPaths,
 } from './connectors/cc-hooks'
 import { registerCcConnectorRoutes } from './connectors/cc-routes'
+import {
+  installCodexHooks,
+  uninstallCodexHooks,
+  writeCodexHookConfigs,
+  codexHooksInstalled,
+  type CodexHooksPaths,
+} from './connectors/codex-hooks'
+import { registerCodexConnectorRoutes } from './connectors/codex-routes'
+import { createCodexDialogueSource } from './connectors/codex-dialogue-source'
 import { createStatsLedger } from './connectors/stats-ledger'
 import { registerStatsRoutes } from './connectors/stats-routes'
 import { createDialogueSource } from './connectors/dialogue-source'
@@ -271,7 +281,8 @@ async function bootstrap(): Promise<void> {
   // hook payloads; the route probes sources in order.
   const dialogueSource = createDialogueSource({ cliDir: () => join(homedir(), '.zcode', 'cli'), now: () => Date.now() })
   const ccDialogueSource = createCcDialogueSource({ claudeDir: () => join(homedir(), '.claude'), now: () => Date.now() })
-  registerDialogueRoutes({ webServer: server.webServer }, { sources: [ccDialogueSource, dialogueSource] })
+  const codexDialogueSource = createCodexDialogueSource({ codexDir: () => join(homedir(), '.codex'), now: () => Date.now() })
+  registerDialogueRoutes({ webServer: server.webServer }, { sources: [ccDialogueSource, codexDialogueSource, dialogueSource] })
   const zcodeEnabled = (): boolean => settingsStore?.get().connectors.zcode.enabled ?? true
   const syncZcodeCfgFiles = (): Promise<void> => {
     if (!zcodeEnabled() || server === null) return Promise.resolve()
@@ -343,6 +354,50 @@ async function bootstrap(): Promise<void> {
     },
   })
 
+  // OpenAI Codex connector (Phase 16, docs/08): third profile on the shared
+  // engine. hooks.json carries a trust hash per group — Codex asks the user
+  // to confirm our hooks once after install (settings card says so).
+  const codexPaths: CodexHooksPaths = {
+    cfgDir: join(app.getPath('userData'), 'codex-hooks'),
+    hooksPath: join(homedir(), '.codex', 'hooks.json'),
+  }
+  const codexConnector = createCodexConnector({
+    relay: server.relay,
+    now: () => Date.now(),
+    isFollowEnabled: () => settingsStore?.get().connectors.codex.followLatestUser ?? false,
+    stats: statsLedger,
+    log: (message) => console.log(message),
+  })
+  const codexEnabled = (): boolean => settingsStore?.get().connectors.codex.enabled ?? true
+  const syncCodexCfgFiles = (): Promise<void> => {
+    if (!codexEnabled() || server === null) return Promise.resolve()
+    return writeCodexHookConfigs(codexPaths.cfgDir, server.port).catch((error: unknown) => {
+      console.error('[petween-codex] cfg sync failed', error)
+    })
+  }
+  void syncCodexCfgFiles()
+  registerCodexConnectorRoutes({ webServer: server.webServer }, {
+    isEnabled: codexEnabled,
+    onHookEvent: (input) => {
+      codexConnector.handle(input)
+      if (input.payload?.transcriptPath !== undefined) {
+        codexDialogueSource.noteTranscript(input.sessionId, input.payload.transcriptPath)
+      }
+    },
+    connectorStatus: async () => ({
+      ...codexConnector.status(),
+      enabled: codexEnabled(),
+      hooksInstalled: await codexHooksInstalled(codexPaths),
+    }),
+    installHooks: async () => {
+      await syncCodexCfgFiles()
+      await installCodexHooks(codexPaths)
+    },
+    uninstallHooks: async () => {
+      await uninstallCodexHooks(codexPaths)
+    },
+  })
+
   // DSH bridge lifecycle driven by the settings store (docs/05 Phase 4).
   let bridge: ReturnType<typeof createDshBridge> | null = null
   const startBridge = (): void => {
@@ -404,6 +459,7 @@ async function bootstrap(): Promise<void> {
     physics.dispose()
     zcodeConnector.dispose()
     ccConnector.dispose()
+    codexConnector.dispose()
     bridge?.close()
     tray.destroy()
     void server?.close().catch(() => {})

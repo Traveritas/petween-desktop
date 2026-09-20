@@ -33,6 +33,7 @@ petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 +
 | `docs/05-mvp-plan.md` | **执行入口**：Phase 0~16 任务清单 + 验收标准 + v0.1.0 / v0.4.0 里程碑评审 | 任何时候——当前进度记录于此 |
 | `docs/06-zcode-connector.md` | zcode 连接器规格（事件映射/传输与端口发现/安装卸载/watchdog/观察项） | 改 connectors/ 下任何代码前；做其他 Agent 连接器时作模板 |
 | `docs/07-cc-connector.md` | Claude Code 连接器规格（共享层/CC 侧事实/事件映射/session-end/观察项） | 改 cc-* 连接器代码前 |
+| `docs/08-codex-connector.md` | Codex 连接器规格（hooks.json 命令串形态/turn_id/信任机制/task_complete 直取） | 改 codex-* 连接器代码前 |
 
 ## 4. 关键架构决策速览
 
@@ -105,6 +106,7 @@ pnpm dist:win                                                            # petwe
 - **2026-09-20（v0.4.0 里程碑）**：碰撞箱/遮挡修复/泡泡线（含皮肤四批）真机验收通过，动画编辑器线拍板搁置；五路子智能体综合评审（主进程/渲染层/测试/文档/安全）**零 P0、5 P1 全修**——follow 模式焦点切换吞事件、设置页 PUT 重试死代码、`animationId` 存量迁移丢失（v0.2.5 契约在 v0.3.x 重构中丢失）、**routes-host Host 白名单防 DNS rebinding**（收口 v0.1.0 backlog #4；dev 代理加 changeOrigin）、文档失真批（AGENTS 指针/决策 4/决策 7、docs/02/04 proxy 清单、docs/06 §8.5 损坏文本）；P2 当场修 14 项（zcode-hooks 精确归属/串行化/非数组保护/.bak/不强制 enabled、ws maxPayload+NOOP error、legacy-import 失败弹窗、companions.enabled per-id 合并、holdMs=0、bump 入场窗口抑制、三窗导航锁 loopback、hud 环回绕 thinking 兜底等）；**264 用例全绿（+23）后打标签 v0.4.0**。CC 连接器（Phase 15）/Codex 连接器（Phase 16）开工计划落 docs/05 尾部。评审详情与 backlog 见 docs/05「v0.4.0 里程碑评审」节。
 - **2026-09-20（晚）：Phase 15 Claude Code 连接器代码完成（v0.5.0）**：spike 实证（本机 CC 2.1.234 + 官方 hooks reference——settings.json 顶层 hooks 键与 zcode 同构、exec 形式 hooks、timeout 单位秒、**热加载无需重启 CC**、prompt_id 即 turnId、matcher 同族语义）；共享层抽取（`hook-connector.ts` 引擎 + `config-io.ts` + `route-helpers.ts`，zcode 三文件薄壳化，行为零变化）；cc-connector（session-end 即时 dispose——排在惰性定时器之前防二次 dispose、PermissionRequest+Notification 共用 waiting）、cc-hooks（settings.json 合并安装/卸载，v0.4.0 四加固全量）、cc-routes（stdin JSON 解析）；设置卡 HookConnectorCard 泛型双实例。264→302 用例全绿（+38）。**同日追加（v0.5.1）：对话泡泡解绑**——dialogue 路由多源化（sources[] 顺序探测）+ cc-dialogue-source（transcript 父链回溯精确回合匹配，spike 实证 user 行带 promptId/父链 100% 可达；hook 载荷 transcript_path 喂注册表 + projects 扫描兜底）+ dialogue-text.ts 归约共享；HUD 零改动，zcode 行为不变。312 用例全绿；**真机验收待用户：设置→连接→Claude Code 安装 hooks（无需重启 CC，泡泡四件套含回复文本全点亮）**。规格 docs/07（§9）。
 - petween 基线：64 测试文件 / 1111 用例全绿（`8190ae6` = `50942a5`（V1.2 工作台 + P12 scrub/zoom + P13 多选/undo + P14 曲线编辑器）+ 光标两修 `f21d904`/`8190ae6`；`6ed667e` 起 `changePoseWithinActive` 默认 true——2026-09-18 用户拍板，桌面/DSH 两宿主共用）；petween-physics 基线：12 文件 / 190 用例（`0a83a24`）。
+- **2026-09-20（夜）：Phase 15 两路评审修复（0 P1、6 P2）+ Phase 16 Codex 连接器代码完成（v0.6.0）**：评审（引擎保真+安全面）确认抽取逐字保真、零 P1，修 6 个 P2（quit 漏 ccConnector.dispose、cc-dialogue 全量驻留改流式+64MB 总帽、noteTranscript 路径校验防注册表投毒、dialogue 多源容错、顶层 hooks 非对象拒绝、卸载清 .petween-bak——317 用例）后推送。Phase 16：spike 推翻「command hooks 家族」预判——**Codex 0.154 原生 hooks 即 CC 兼容引擎**（codex-rs `ClaudeHooksEngine`，`~/.codex/hooks.json` 命令串形态经 cmd.exe /C，本机 deja-vu hooks 共存实测）；`turn_id` 原生回合 id、`transcript_path` 可 null、**hooks 哈希信任机制（安装后 Codex 请求一次确认）**；Interrupt→session-start（打断立即 idle）、SessionEnd 即时 dispose、无 Notification；对话泡泡由 rollout `task_complete`（`turn_id`+`last_agent_message`）直取——Phase 15 解绑即刻兑现。设置卡三实例（zcode/CC/Codex）。346 用例全绿（+29）；**真机验收待用户：CC 与 Codex 一并（docs/05 Phase 15/16 验收清单）**。规格 docs/08。
 
 ## 7. 给编码智能体的原则
 

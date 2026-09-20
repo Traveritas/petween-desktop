@@ -599,6 +599,26 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 - ~~CC 对话泡泡（回复摘要）~~（✅ 同日解绑批完成，v0.5.1：dialogue 多源化 + cc-dialogue-source 父链回溯，详见 docs/07 §9；真机验收项并入下方清单）。
 - Notification 触发面观察（docs/07 §6.2）：不合适的等待视觉 → 摘掉 Notification 注册只留 PermissionRequest。
 
-## Phase 16：Codex 连接器（跟随 Phase 15）
+## Phase 16：Codex 连接器（2026-09-20 代码完成；真机验收与 CC 一起）
 
-Phase 7 调研归类为「command hooks」家族（与 Codex/Gemini/Cursor 同型）：传输 = 进程启动时命令行钩子或文件监听，非本机 HTTP 监听。开工前需独立 spike 确认 Codex 的事件源形态（CLI hook / 会话文件 / notify 命令），规格按 docs/06/07 模板立 docs/08。公共层（hook-connector 引擎、config-io、route-helpers）已在 Phase 15 抽出就位。
+规格 = **docs/08**。spike 推翻了 Phase 7 的「command hooks 家族」预判：**Codex 0.154 已实现 CC 兼容的原生 hooks**（codex-rs 引擎名就叫 `ClaudeHooksEngine`，配置在 `~/.codex/hooks.json`，本机 deja-vu hooks 共存实测）——于是 Codex 直接复用共享引擎成为第三个 profile，一行都没浪费在文件监听上。
+
+### 要点
+
+- **命令串形态**：Codex hook 的 command 是单字符串经 cmd.exe /C 执行（无 args 数组）——cfg 路径在命令串里加引号；timeout 秒。
+- **`turn_id` 原生**：stdin 载荷直接带官方回合 id（比 CC 的 prompt_id 还直接）；`transcript_path` 可 null（disable_response_storage）。
+- **Interrupt → session-start**：用户打断立即 idle（不注册则打断后猫卡工作脸到 30min 兜底）；无 Notification 事件。
+- **信任机制**：hooks 哈希比对——安装后 Codex 请求一次信任确认（设置卡文案注明）。
+- **对话泡泡零成本点亮**：rollout 的 `task_complete` 事件直接带 `turn_id` + `last_agent_message`——dialogue 源流式留最后一个非空条目即可（Phase 15 的解绑在此兑现）。
+- 编辑行数：apply_patch 走 line-count 的 patch 分支，CC 形状 Edit/Write 兜底。
+
+### 验收（待用户，与 Phase 15 一并）
+
+- [ ] 设置→连接→Codex「安装 hooks」→ Codex 内确认一次信任 → 新会话联动
+- [ ] 表情全链路（thinking/working×3 类/waiting/stop 衰减/打断立即 idle/SessionEnd 收泡）
+- [ ] 泡泡四件套（对话泡泡 task_complete 直取）
+- [ ] 卸载恢复（deja-vu hooks 完整）
+
+### 后置项
+
+- 信任确认 UX 与 hooks.json 热加载的实测口径（docs/08 §6.1/6.2）；matcher 别名表逐个实测；工具名漂移观察。

@@ -42,7 +42,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 function useSettings(): {
   settings: DesktopSettings | null
-  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']>; companions: Partial<DesktopSettings['companions']>; connectors: { zcode?: Partial<DesktopSettings['connectors']['zcode']>; cc?: Partial<DesktopSettings['connectors']['cc']> } }>) => void
+  patch: (patch: Partial<{ clickThrough: Partial<DesktopSettings['clickThrough']>; dsh: Partial<DesktopSettings['dsh']>; companions: Partial<DesktopSettings['companions']>; connectors: { zcode?: Partial<DesktopSettings['connectors']['zcode']>; cc?: Partial<DesktopSettings['connectors']['cc']>; codex?: Partial<DesktopSettings['connectors']['codex']> } }>) => void
 } {
   const [settings, setSettings] = useState<DesktopSettings | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -84,6 +84,7 @@ function useSettings(): {
       connectors?: {
         zcode?: Partial<DesktopSettings['connectors']['zcode']>
         cc?: Partial<DesktopSettings['connectors']['cc']>
+        codex?: Partial<DesktopSettings['connectors']['codex']>
       }
     }
     if (latest.current !== null) {
@@ -95,6 +96,7 @@ function useSettings(): {
         connectors: {
           zcode: { ...latest.current.connectors.zcode, ...optimistic.connectors?.zcode },
           cc: { ...latest.current.connectors.cc, ...optimistic.connectors?.cc },
+          codex: { ...latest.current.connectors.codex, ...optimistic.connectors?.codex },
         },
       })
     }
@@ -199,14 +201,22 @@ function formatAge(ts: number, now: number): string {
   return `${Math.round(seconds / 3600)} 小时前`
 }
 
+const CONNECTOR_TITLES: Record<'zcode' | 'cc' | 'codex', string> = {
+  zcode: 'zcode',
+  cc: 'Claude Code',
+  codex: 'Codex',
+}
+
 function HookConnectorCard(props: {
   settings: DesktopSettings
   patch: ReturnType<typeof useSettings>['patch']
-  /** 'zcode' | 'cc' — the settings group, URL slug and display name in one. */
-  slug: 'zcode' | 'cc'
+  /** The settings group, URL slug and display name in one. */
+  slug: 'zcode' | 'cc' | 'codex'
   /** Install-row copy: where the merge write goes + how it takes effect. */
   installHint: string
   installedHint: string
+  /** Suffix note under the coverage line while no events have arrived yet. */
+  idleNote: string
 }): JSX.Element {
   const [status, setStatus] = useState<ZcodeConnectorStatus | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -271,11 +281,11 @@ function HookConnectorCard(props: {
     <div className="connector">
       <div className="connectorHead">
         <span className={`dot ${enabled && status?.hooksInstalled ? 'on' : ''}`} />
-        <strong>{slug === 'zcode' ? 'zcode' : 'Claude Code'}</strong>
+        <strong>{CONNECTOR_TITLES[slug]}</strong>
         <span className="connectorState">{stateText}</span>
       </div>
       <Toggle
-        label={`启用 ${slug === 'zcode' ? 'zcode' : 'Claude Code'} 连接器`}
+        label={`启用 ${CONNECTOR_TITLES[slug]} 连接器`}
         hint="接收 hooks 事件并驱动宠物状态（关闭后为纯监听不联动）"
         checked={enabled}
         onChange={(next) => props.patch({ connectors: { [slug]: { enabled: next } } as never })}
@@ -298,11 +308,7 @@ function HookConnectorCard(props: {
       {status !== null && status.hooksInstalled && (
         <p className="sectionHint">
           已覆盖 {status.sessionsSeen} 个会话
-          {status.lastEventAt === null
-            ? slug === 'zcode'
-              ? '（尚无事件——若刚安装，请重启 zcode 客户端）'
-              : '（尚无事件——CC 会热加载 settings.json，新会话即生效）'
-            : ''}
+          {status.lastEventAt === null ? props.idleNote : ''}
           。事件经本机 curl POST 直达，工具调用开销约 50ms。
         </p>
       )}
@@ -382,6 +388,7 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         slug="zcode"
         installHint="向 ~/.zcode/cli/config.json 合并写入 hook 注册；安装后需重启 zcode 客户端生效"
         installedHint="从 zcode 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
+        idleNote="（尚无事件——若刚安装，请重启 zcode 客户端）"
       />
 
       <HookConnectorCard
@@ -390,6 +397,16 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
         slug="cc"
         installHint="向 ~/.claude/settings.json 合并写入 hook 注册；CC 会热加载，无需重启即生效"
         installedHint="从 Claude Code 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
+        idleNote="（尚无事件——CC 会热加载 settings.json，新会话即生效）"
+      />
+
+      <HookConnectorCard
+        settings={props.settings}
+        patch={props.patch}
+        slug="codex"
+        installHint="向 ~/.codex/hooks.json 合并写入 hook 注册；Codex 会请求一次信任确认（hooks 哈希校验）"
+        installedHint="从 Codex 配置中移除 Petween 的 hook 注册（合并写入，不影响其他配置）"
+        idleNote="（尚无事件——若刚安装，请在 Codex 里确认信任新增 hooks 后开启新会话）"
       />
 
       <div className="connector placeholder">
@@ -398,7 +415,7 @@ function ConnectSection(props: { settings: DesktopSettings; patch: ReturnType<ty
           <strong>更多 Agent 工具</strong>
           <span className="connectorState">规划中</span>
         </div>
-        <p className="sectionHint">Codex / opencode 等将按同一连接器架构加入（docs/06/07）。</p>
+        <p className="sectionHint">opencode 等将按同一连接器架构加入（docs/06/07/08）。</p>
       </div>
     </section>
   )
