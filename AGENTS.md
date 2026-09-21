@@ -33,7 +33,8 @@ petween-desktop/            ← 本仓库（独立 git，Electron 壳 + 文档 +
 | `docs/05-mvp-plan.md` | **执行入口**：Phase 0~18 任务清单 + 验收标准 + 各里程碑评审（v0.1.0/v0.4.0/v0.7.0/v0.8.0） | 任何时候——当前进度记录于此 |
 | `docs/06-zcode-connector.md` | zcode 连接器规格（事件映射/传输与端口发现/安装卸载/watchdog/观察项） | 改 connectors/ 下任何代码前；做其他 Agent 连接器时作模板 |
 | `docs/07-cc-connector.md` | Claude Code 连接器规格（共享层/CC 侧事实/事件映射/session-end/观察项） | 改 cc-* 连接器代码前 |
-| `docs/08-codex-connector.md` | Codex 连接器规格（hooks.json 命令串形态/turn_id/信任机制/task_complete 直取） | 改 codex-* 连接器代码前 |
+|  `docs/08-codex-connector.md` | Codex 连接器规格（hooks.json 命令串形态/turn_id/信任机制/task_complete 直取） | 改 codex-* 连接器代码前 |
+| `docs/09-release-pv.md` | 发布材料：B站主片 PV 脚本（120BPM/80s 音乐驱动分镜/音效表/拍摄清单）——非技术规格 | 做发布视频/配曲时 |
 
 ## 4. 关键架构决策速览
 
