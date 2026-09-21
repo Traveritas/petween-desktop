@@ -1,15 +1,26 @@
 /**
- * roamer/windows.ts — the mischief content layer (docs/05 Phase 17 batch 3):
- * the pulled-out content windows and sticky notes the pet drags onto the
- * desktop. BubbleHost's skeleton applied to a different shape — a fixed,
- * pointer-events:none layer (click-through untouched), spawn → linger →
- * exit-class → timer removal, viewport clamping, and a dispose that clears
- * every timer. Below the bubble layer so stats/dialogue bubbles always win.
+ * roamer/windows.ts — the mischief content layer (docs/05 Phase 17 batch 3,
+ * feedback pass 2026-09-21): the pulled-out content windows and sticky notes
+ * the pet drags onto the desktop. BubbleHost's skeleton applied to a
+ * different shape — a fixed, pointer-events:none layer (click-through
+ * untouched), spawn → linger → exit-class → timer removal, viewport
+ * clamping, and a dispose that clears every timer. Below the bubble layer
+ * so stats/dialogue bubbles always win.
  *
  * Two placements:
- *  - pull: anchored near the pet, sliding in FROM the screen edge the pet
- *    walked to (CSS keyframes; DOM is not bound by the §27 stage clamp);
- *  - note: a small sticky at a random band position with a slight tilt.
+ *  - pull: a mini "window" (title bar with traffic dots + caption) anchored
+ *    near the pet, sliding in FROM the screen edge the pet walked to;
+ *  - note: a sticky note (tape strip, lined paper for text, polaroid frame
+ *    for images) at a random band position with a slight tilt.
+ *
+ * Linger is caller-supplied (options.mischief pull/noteLingerMs, 0.5..60s).
+ *
+ * Two DOM/CSS traps this file is explicit about:
+ *  - The note tilt is a CSS custom property (--pt-rot) consumed INSIDE the
+ *    pop keyframes, not an inline transform: keyframes with fill-mode both
+ *    permanently override inline transforms after the enter animation.
+ *  - Images size to their container (width:100%), never to the generic
+ *    300px cap — a 210px note used to clip wide images mid-picture.
  *
  * jsdom-testable: no WAAPI, class/timer driven like the bubble layer
  * (jsdom runs no CSS animations; tests assert classes + removal timing).
@@ -27,6 +38,8 @@ export interface RoamerWindowSpawn {
   /** The pet's viewport position at spawn time ('pull' anchors near it). */
   anchor: { x: number; y: number; height: number }
   viewport: { width: number; height: number }
+  /** Linger before the fade; defaults below when omitted. */
+  lingerMs?: number
 }
 
 export interface RoamerWindowHandle {
@@ -41,28 +54,73 @@ export interface RoamerWindowHost {
   dispose(): void
 }
 
-/** Linger before the fade: a pulled window is a scene, a note is a fixture. */
+/** Fallback linger (callers pass the user's option through). */
 const PULL_LINGER_MS = 25000
-const NOTE_LINGER_MS = 90000
+const NOTE_LINGER_MS = 45000
 const EXIT_FADE_MS = 600
 
 const BASE_CSS = `
 .pt-roamer-layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147280000; }
+
+/* --- pulled window: a hand-dragged mini window --- */
 .pt-roamer-win {
-  position: absolute; max-width: 300px; border-radius: 10px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  position: absolute; max-width: 300px; border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.18);
   font: 13px/1.5 system-ui, 'Segoe UI', sans-serif; color: #222;
-  background: #fdfdfb; overflow: hidden;
+  background: linear-gradient(180deg, #ffffff, #f3f1ea);
+  overflow: hidden;
 }
-.pt-roamer-win img { display: block; max-width: 300px; max-height: 42vh; object-fit: contain; }
+.pt-roamer-win__bar {
+  display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08); font-size: 11px; color: #555;
+}
+.pt-roamer-win__dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.pt-roamer-win__dot:nth-of-type(1) { background: #ff5f57; }
+.pt-roamer-win__dot:nth-of-type(2) { background: #febc2e; }
+.pt-roamer-win__dot:nth-of-type(3) { background: #28c840; }
+.pt-roamer-win__bar .pt-roamer-win__caption {
+  flex: 1 1 auto; padding: 0; border: 0; font-size: 11px; color: #555;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pt-roamer-win img {
+  display: block; width: 100%; height: auto; max-height: 42vh;
+  object-fit: contain; background: #fff;
+}
 .pt-roamer-win__text { padding: 10px 12px; white-space: pre-wrap; word-break: break-word; max-height: 30vh; overflow: hidden; }
-.pt-roamer-win--note .pt-roamer-win__text { max-height: 18vh; }
-.pt-roamer-win__caption {
-  padding: 4px 10px 6px; font-size: 11px; color: #666;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+
+/* --- sticky note: tape strip + lined paper (text) or polaroid (image) --- */
+.pt-roamer-win--note {
+  max-width: 210px; border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 3px; box-shadow: 0 5px 16px rgba(0, 0, 0, 0.3);
+  background: repeating-linear-gradient(
+    180deg, #fff8c4 0px, #fff8c4 25px, #f3ecab 26px
+  );
 }
-.pt-roamer-win--note { max-width: 190px; background: #fff8c4; border-radius: 2px; }
-.pt-roamer-win--note .pt-roamer-win__text { font-family: KaiTi, 'Kaiti SC', cursive; }
+.pt-roamer-win--note::before {
+  content: ''; position: absolute; top: -9px; left: 50%;
+  transform: translateX(-50%) rotate(-2deg);
+  width: 62px; height: 17px; border-radius: 1px;
+  background: rgba(228, 226, 204, 0.9); border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.pt-roamer-win--note .pt-roamer-win__text {
+  font-family: KaiTi, 'Kaiti SC', cursive; font-size: 14px; max-height: 18vh;
+  background: transparent; padding: 12px 12px 10px;
+}
+/* Image notes switch to a white polaroid frame (lines would fight the photo). */
+.pt-roamer-win--note.pt-roamer-win--has-image {
+  background: #fff; padding: 8px 8px 6px;
+}
+.pt-roamer-win--note.pt-roamer-win--has-image img {
+  border-radius: 2px; background: #f4f2ec;
+}
+.pt-roamer-win--note .pt-roamer-win__caption {
+  padding: 4px 2px 2px; font-size: 12px; color: #6b6350;
+  font-family: KaiTi, 'Kaiti SC', cursive;
+  border-top: 0;
+}
+
 @keyframes pt-roamer-slide-left {
   from { transform: translateX(calc(-100% - 32px)); }
   to { transform: translateX(0); }
@@ -71,9 +129,11 @@ const BASE_CSS = `
   from { transform: translateX(calc(100% + 32px)); }
   to { transform: translateX(0); }
 }
+/* The tilt rides a custom property: fill-mode both would otherwise pin the
+   transform to the keyframe end value and silently kill the inline rotate. */
 @keyframes pt-roamer-pop {
-  from { transform: scale(0.6); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from { transform: scale(0.6) rotate(var(--pt-rot, 0deg)); opacity: 0; }
+  to { transform: scale(1) rotate(var(--pt-rot, 0deg)); opacity: 1; }
 }
 @keyframes pt-roamer-fade {
   from { opacity: 1; }
@@ -112,8 +172,19 @@ export function createRoamerWindowHost(): RoamerWindowHost {
     entry.el.remove()
   }
 
-  const render = (el: HTMLElement, content: RoamerContentItem): void => {
+  const dots = (): DocumentFragment => {
+    const fragment = document.createDocumentFragment()
+    for (let i = 0; i < 3; i += 1) {
+      const dot = document.createElement('span')
+      dot.className = 'pt-roamer-win__dot'
+      fragment.appendChild(dot)
+    }
+    return fragment
+  }
+
+  const render = (el: HTMLElement, content: RoamerContentItem, isNote: boolean): void => {
     if (content.kind === 'image') {
+      el.classList.add('pt-roamer-win--has-image')
       const img = document.createElement('img')
       img.src = content.url ?? ''
       img.alt = content.caption ?? ''
@@ -124,18 +195,31 @@ export function createRoamerWindowHost(): RoamerWindowHost {
       text.textContent = content.text ?? ''
       el.appendChild(text)
     }
-    if (content.caption !== undefined && content.kind === 'image') {
+    if (content.caption !== undefined) {
       const caption = document.createElement('div')
       caption.className = 'pt-roamer-win__caption'
       caption.textContent = content.caption
-      el.appendChild(caption)
+      if (isNote) el.appendChild(caption)
+      else {
+        // Pulled windows show the caption in a title bar with traffic dots.
+        const bar = document.createElement('div')
+        bar.className = 'pt-roamer-win__bar'
+        bar.appendChild(dots())
+        bar.appendChild(caption)
+        el.prepend(bar)
+      }
+    } else if (!isNote) {
+      const bar = document.createElement('div')
+      bar.className = 'pt-roamer-win__bar'
+      bar.appendChild(dots())
+      el.prepend(bar)
     }
   }
 
   /**
    * Clamp a top so the window stays fully on screen whatever the anchor.
-   * The budget mirrors the CSS caps above (img ≤ 42vh + caption line ≈ 40px)
-   * — the old flat 160px estimate let tall images hang off the bottom when
+   * The budget mirrors the CSS caps above (img ≤ 42vh + bar ≈ 32px) —
+   * the old flat 160px estimate let tall images hang off the bottom when
    * the pet anchored low.
    */
   const clampTop = (top: number, viewportHeight: number): number => {
@@ -147,16 +231,17 @@ export function createRoamerWindowHost(): RoamerWindowHost {
     const el = document.createElement('div')
     const isNote = spec.kind === 'note'
     el.className = `pt-roamer-win${isNote ? ' pt-roamer-win--note' : ''}`
-    render(el, spec.content)
+    render(el, spec.content, isNote)
 
     let enterClass = 'pt-roamer-enter-pop'
     if (isNote) {
-      // Random band placement away from the dead center, slight tilt.
+      // Random band placement away from the dead center, slight tilt (the
+      // tilt rides --pt-rot — see the keyframes comment above).
       const vw = spec.viewport.width
       const vh = spec.viewport.height
       el.style.left = `${Math.round(vw * 0.12 + Math.random() * vw * 0.55)}px`
       el.style.top = `${Math.round(vh * 0.12 + Math.random() * vh * 0.6)}px`
-      el.style.transform = `rotate(${(Math.random() * 6 - 3).toFixed(1)}deg)`
+      el.style.setProperty('--pt-rot', `${(Math.random() * 6 - 3).toFixed(1)}deg`)
     } else {
       // Pulled window: rest just inside the edge, at the pet's height.
       const edge = spec.edge ?? 'right'
@@ -187,7 +272,8 @@ export function createRoamerWindowHost(): RoamerWindowHost {
         timers.add(entry.timer)
       },
     }
-    later(() => handle.close(), isNote ? NOTE_LINGER_MS : PULL_LINGER_MS)
+    const fallbackLinger = isNote ? NOTE_LINGER_MS : PULL_LINGER_MS
+    later(() => handle.close(), Math.max(500, spec.lingerMs ?? fallbackLinger))
     return handle
   }
 

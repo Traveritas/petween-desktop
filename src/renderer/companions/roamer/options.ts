@@ -37,6 +37,8 @@ export const DEFAULT_MISCHIEF: RoamerMischiefOptions = {
   actions: { pullWindow: true, stickyNote: true, dashAcross: false, edgePeek: false },
   minIntervalMs: 480000,
   maxIntervalMs: 1500000,
+  pullLingerMs: 25000,
+  noteLingerMs: 45000,
 }
 
 const IDLE_ACTION_IDS: readonly IdleActionId[] = ['doze', 'lookAround', 'sway', 'shake']
@@ -102,6 +104,9 @@ function normalizeMischief(raw: unknown): RoamerMischiefOptions {
     actions,
     minIntervalMs: interval.min,
     maxIntervalMs: interval.max,
+    // User-facing range 0.5s..60s (settings card shows seconds).
+    pullLingerMs: clampNumber(bag.pullLingerMs, DEFAULT_MISCHIEF.pullLingerMs, 500, 60000),
+    noteLingerMs: clampNumber(bag.noteLingerMs, DEFAULT_MISCHIEF.noteLingerMs, 500, 60000),
   }
 }
 

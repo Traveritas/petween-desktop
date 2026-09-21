@@ -25,6 +25,7 @@ import type { DesktopCompanion, DesktopCompanionContext } from '../registry'
 import { createRoamerEngine } from './engine'
 import { normalizeRoamerOptions } from './options'
 import {
+  DASH_ANIMATION_ID,
   IDLE_ACTION_ANIMATION_IDS,
   PEEK_LEFT_ANIMATION_ID,
   PEEK_RIGHT_ANIMATION_ID,
@@ -118,7 +119,7 @@ export function createRoamerCompanion(): DesktopCompanion {
         }
       }
 
-      const startWalk = (plan: WanderLegPlan): void => {
+      const startWalk = (plan: WanderLegPlan, gait: 'walk' | 'dash' = 'walk'): void => {
         const lease = petween.requestPositionControl()
         if (lease === null) {
           pump({ type: 'lease-denied', now: Date.now() })
@@ -133,9 +134,9 @@ export function createRoamerCompanion(): DesktopCompanion {
             ? { x: snapshot.x, y: snapshot.y }
             : { x: plan.from.x, y: plan.from.y }
         const startedPerf = performance.now()
-        // Walk visuals: the bob animation always, the pose override only if
-        // the user uploaded one (flashAsset needs no registration).
-        walkAnim = petween.playAnimation(WALK_BOB_ANIMATION_ID)
+        // Gait picks the loop skin: the casual bob, or the leaning dash run.
+        // The pose override (if the user uploaded one) rides on top either way.
+        walkAnim = petween.playAnimation(gait === 'dash' ? DASH_ANIMATION_ID : WALK_BOB_ANIMATION_ID)
         if (options.poses.walk !== undefined) {
           walkFlashActive = petween.flashAsset({ url: options.poses.walk }, plan.durationMs + 500)
         }
@@ -181,6 +182,7 @@ export function createRoamerCompanion(): DesktopCompanion {
           kind: command.kind,
           edge: command.edge,
           content: command.content,
+          lingerMs: command.kind === 'note' ? options.mischief.noteLingerMs : options.mischief.pullLingerMs,
           anchor: {
             x: current.x,
             y: current.y,
@@ -212,7 +214,7 @@ export function createRoamerCompanion(): DesktopCompanion {
       const execute = (command: RoamerCommand): void => {
         switch (command.type) {
           case 'wander-start':
-            startWalk(command)
+            startWalk(command, command.gait ?? 'walk')
             break
           case 'wander-end':
             endWalk(command.commit)

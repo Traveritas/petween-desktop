@@ -154,18 +154,20 @@ export const SHAKE_ANIMATION: AnimationDefinition = {
 }
 
 /**
- * Edge peeks (batch 4): the pet leans PAST the screen edge on the motion
- * layer — transition.x is a pure visual offset (the §27 position clamp
- * keeps the stage box ≥32px visible; the lean is what sells the peek).
- * Facing per edge: left peeks lean negative, right positive. Mirroring a
- * user's walk POSE is impossible through the pose channel (zoom validates
- * 0.2..8, no negatives) — peeks lean instead, which needs no pose at all.
+ * Edge peeks (batch 4, strengthened in the feedback pass): the pet leans
+ * PAST the screen edge on the motion layer — transition.x is a pure visual
+ * offset (the §27 position clamp keeps the stage box ≥32px visible; the
+ * lean is what sells the peek). Facing per edge: left peeks lean negative,
+ * right positive. Mirroring a user's walk POSE is impossible through the
+ * pose channel (zoom validates 0.2..8, no negatives) — peeks lean instead,
+ * which needs no pose at all. The double-dip with rotation is what makes
+ * the effect READ at a glance (a flat slide was invisible in feedback).
  */
 export const PEEK_LEFT_ANIMATION_ID = 'user:roamer-edge-peek-left'
 export const PEEK_RIGHT_ANIMATION_ID = 'user:roamer-edge-peek-right'
 
 /** How long the engine occupies the pet for one peek. */
-export const PEEK_DURATION_MS = 2600
+export const PEEK_DURATION_MS = 3200
 
 const peekAnimation = (id: string, name: string, direction: 1 | -1): AnimationDefinition => ({
   version: 1,
@@ -178,10 +180,22 @@ const peekAnimation = (id: string, name: string, direction: 1 | -1): AnimationDe
     {
       property: 'transition.x',
       keyframes: [
-        { at: 0, value: 0, easing: 'ease-in-out' },
-        { at: 0.25, value: 44 * direction, easing: 'linear' },
-        { at: 0.45, value: 12 * direction, easing: 'ease-in-out' },
-        { at: 0.75, value: 44 * direction, easing: 'linear' },
+        { at: 0, value: 0, easing: 'ease-out' },
+        { at: 0.2, value: 72 * direction, easing: 'linear' },
+        { at: 0.42, value: 18 * direction, easing: 'ease-in-out' },
+        { at: 0.68, value: 76 * direction, easing: 'linear' },
+        { at: 0.82, value: 76 * direction, easing: 'ease-in-out' },
+        { at: 1, value: 0 },
+      ],
+    },
+    {
+      property: 'transition.rotation',
+      keyframes: [
+        { at: 0, value: 0, easing: 'ease-out' },
+        { at: 0.2, value: 7 * direction, easing: 'linear' },
+        { at: 0.42, value: 2 * direction, easing: 'ease-in-out' },
+        { at: 0.68, value: 8 * direction, easing: 'linear' },
+        { at: 0.82, value: 8 * direction, easing: 'ease-in-out' },
         { at: 1, value: 0 },
       ],
     },
@@ -190,6 +204,48 @@ const peekAnimation = (id: string, name: string, direction: 1 | -1): AnimationDe
 
 export const PEEK_LEFT_ANIMATION: AnimationDefinition = peekAnimation(PEEK_LEFT_ANIMATION_ID, 'Roamer Edge Peek Left', -1)
 export const PEEK_RIGHT_ANIMATION: AnimationDefinition = peekAnimation(PEEK_RIGHT_ANIMATION_ID, 'Roamer Edge Peek Right', 1)
+
+/**
+ * The dash gait (feedback pass): a dash leg must read as a RUN, not a fast
+ * walk — forward lean (constant rotation), a faster/deeper bob and a slight
+ * horizontal stretch do that without any pose art.
+ */
+export const DASH_ANIMATION_ID = 'user:roamer-dash'
+
+export const DASH_ANIMATION: AnimationDefinition = {
+  version: 1,
+  id: DASH_ANIMATION_ID,
+  name: 'Roamer Dash',
+  kind: 'interaction',
+  durationMs: 420,
+  repeat: { mode: 'loop' },
+  tracks: [
+    {
+      property: 'transition.y',
+      keyframes: [
+        { at: 0, value: 0, easing: 'ease-in-out' },
+        { at: 0.5, value: -8, easing: 'ease-in-out' },
+        { at: 1, value: 0 },
+      ],
+    },
+    {
+      property: 'transition.rotation',
+      keyframes: [
+        { at: 0, value: 7, easing: 'ease-in-out' },
+        { at: 0.5, value: 9, easing: 'ease-in-out' },
+        { at: 1, value: 7 },
+      ],
+    },
+    {
+      property: 'transition.scaleX',
+      keyframes: [
+        { at: 0, value: 1.05, easing: 'ease-in-out' },
+        { at: 0.5, value: 1.09, easing: 'ease-in-out' },
+        { at: 1, value: 1.05 },
+      ],
+    },
+  ],
+}
 
 /** Everything the host assembly registers once (idempotently). */
 export const ROAMER_ANIMATIONS: readonly AnimationDefinition[] = [
@@ -200,6 +256,7 @@ export const ROAMER_ANIMATIONS: readonly AnimationDefinition[] = [
   SHAKE_ANIMATION,
   PEEK_LEFT_ANIMATION,
   PEEK_RIGHT_ANIMATION,
+  DASH_ANIMATION,
 ]
 
 /** Playback id per idle action (every action has a default motion). */

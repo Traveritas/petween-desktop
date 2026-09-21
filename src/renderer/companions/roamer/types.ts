@@ -46,6 +46,10 @@ export interface RoamerMischiefOptions {
   actions: Record<MischiefActionId, boolean>
   minIntervalMs: number
   maxIntervalMs: number
+  /** How long a pulled window lingers before fading (0.5s..60s). */
+  pullLingerMs: number
+  /** How long a sticky note stays (0.5s..60s). */
+  noteLingerMs: number
 }
 
 export interface RoamerContentItem {
@@ -103,7 +107,12 @@ export interface WanderLegPlan {
 export type PullEdge = 'left' | 'right'
 
 export type RoamerCommand =
-  | ({ type: 'wander-start' } & WanderLegPlan)
+  /**
+   * Start a walk leg. `gait` selects the motion skin: the default walk bob,
+   * or the leaning fast run for a dash leg ('dash' legs only — the engine
+   * marks them so the runtime can sell the speed difference).
+   */
+  | ({ type: 'wander-start'; gait?: 'walk' | 'dash' } & WanderLegPlan)
   /**
    * Stop the current leg. commit=true persists the position (leg completed
    * / settled while hidden); commit=false drops the leg where it stands

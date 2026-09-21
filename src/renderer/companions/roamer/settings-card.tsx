@@ -31,6 +31,8 @@ interface OptionBag {
     actions?: Partial<Record<MischiefActionId, boolean>>
     minIntervalMs?: number
     maxIntervalMs?: number
+    pullLingerMs?: number
+    noteLingerMs?: number
   }
   contentPool?: RoamerContentItem[]
   [key: string]: unknown
@@ -257,6 +259,36 @@ export function RoamerCard(props: PluginSettingsCardProps): JSX.Element {
         />
         <span className="rowHint">ms（拉窗与便签共用内容池）</span>
       </div>
+      <div style={rowStyle}>
+        <span className="rowHint" style={labelStyle}>停留</span>
+        <span className="rowHint">拉窗</span>
+        <input
+          type="number"
+          min={0.5}
+          max={60}
+          step={0.5}
+          style={numberStyle}
+          value={(bag.mischief?.pullLingerMs ?? DEFAULT_MISCHIEF.pullLingerMs) / 1000}
+          onChange={(event) => patchMischief('pullLingerMs', Math.round(Number(event.target.value) * 1000))}
+        />
+        <span className="rowHint">s　便签</span>
+        <input
+          type="number"
+          min={0.5}
+          max={60}
+          step={0.5}
+          style={numberStyle}
+          value={(bag.mischief?.noteLingerMs ?? DEFAULT_MISCHIEF.noteLingerMs) / 1000}
+          onChange={(event) => patchMischief('noteLingerMs', Math.round(Number(event.target.value) * 1000))}
+        />
+        <span className="rowHint">s（0.5~60）</span>
+      </div>
+      {((bag.mischief?.pullLingerMs ?? DEFAULT_MISCHIEF.pullLingerMs) > 10000 ||
+        (bag.mischief?.noteLingerMs ?? DEFAULT_MISCHIEF.noteLingerMs) > 10000) && (
+        <p className="rowHint" style={{ color: '#b26a00', margin: '2px 0 6px' }}>
+          ⚠ 停留超过 10 秒的窗口/便签可能较长时间遮挡屏幕内容，请注意别挡住常用区域。
+        </p>
+      )}
       <div style={rowStyle}>
         <span className="rowHint" style={labelStyle}>内容池</span>
         <label className="rowHint" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

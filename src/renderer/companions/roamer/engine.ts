@@ -339,7 +339,10 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
               } else if (action === 'dashAcross') {
                 const leg = planDashLeg(options)
                 mode = { kind: 'walking', leg, startedAt: event.now, purpose: null }
-                commands.push({ type: 'wander-start', ...leg })
+                // The gait marker makes the runtime play the dash run instead
+                // of the walk bob — speed alone did not read as "dash" in
+                // real-machine feedback.
+                commands.push({ type: 'wander-start', gait: 'dash', ...leg })
               } else {
                 // edgePeek
                 const { edge, leg } = planPullLeg(options)

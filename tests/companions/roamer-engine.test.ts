@@ -356,7 +356,13 @@ describe('mischief', () => {
   it('dashes across to the far side at 4x speed without needing the pool', () => {
     const engine = engineWith(undefined, undefined, undefined, { ...fastMischief, actions: only('dashAcross') })
     arm(engine)
-    const start = walkStartAt(engine, T0 + 5000)
+    const start = engine.apply({ type: 'tick', now: T0 + 5000 })[0] as Extract<
+      RoamerCommand,
+      { type: 'wander-start' }
+    >
+    expect(types([start])).toEqual(['wander-start'])
+    // the gait marker tells the runtime to play the dash run, not the walk bob
+    expect(start.gait).toBe('dash')
     // pet at x=960 is NOT left of center (960 < 960 false) → far side = left edge
     expect(start.to.x).toBe(16)
     const distance = Math.hypot(start.to.x - start.from.x, start.to.y - start.from.y)
@@ -377,9 +383,9 @@ describe('mischief', () => {
     expect(types(engine.apply({ type: 'leg-complete', now: arrival }))).toEqual(['wander-end', 'peek-start'])
     expect(engine.apply({ type: 'leg-complete', now: arrival })).toEqual([])
 
-    // during the lean: no new decisions; after PEEK_DURATION_MS: quiet rest
-    expect(types(engine.apply({ type: 'tick', now: arrival + 2599 }))).toEqual([])
-    expect(types(engine.apply({ type: 'tick', now: arrival + 2601 }))).toEqual([])
+    // during the lean: no new decisions; after PEEK_DURATION_MS (3200): quiet rest
+    expect(types(engine.apply({ type: 'tick', now: arrival + 3199 }))).toEqual([])
+    expect(types(engine.apply({ type: 'tick', now: arrival + 3201 }))).toEqual([])
   })
 
   it('peeks immediately when already at the edge', () => {
