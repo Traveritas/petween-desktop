@@ -742,3 +742,27 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 ### 追记（2026-09-21 晚）：宠物编辑器保存文案对齐（上游 petween `11830e5`）
 
 Phase 18 验收通过后用户追问：宠物页能否同样 取消/应用。核查结论——**编辑器 store 从设计起就是显式保存模型**（updateConfig 只进草稿 / saveConfig=应用 / revertConfig=取消），当时"绕圈"在 UI 呈现不在数据层；用户拍板先做**纯文案对齐**（行为零变化）：SaveIndicator 按钮固定为 应用/取消（原 保存到「name」/保存修改/撤回修改），目标宠物名挪到状态行「有未保存的更改（将应用到「name」）」；切换宠物门控提示写明出口「先『应用』或『取消』再切换」；revertConfig 三条 notice（取消失败/已中止取消/已取消未保存的更改）与 §3.3 门控、卡片提示、独立编辑器副标题同词表。「取消」保留确认弹窗（丢弃一大轮编辑比丢开关金贵）。上游 1111 测试全绿（断言同步更新）；桌面零代码改动，submodule 重建 editor.js + bump 指针即生效。**遗留**：脏时切换仍是"禁止 + 出口提示"而非三选——原语齐备，真觉得烦再升级。
+
+### 追记（2026-09-21 深夜）：粒子特效扩容 + 音效插件化评估（上游 petween `84cebfe` / petween-physics `02b582a`）
+
+**背景**：用户问「特效事件留的口有多大」。结论：容器通用（时间轴事件轨 + 播放路由 + 编辑器编排），内容闭环（事件类型枚举 2、特效枚举 3，扩枚举必须动上游，无装配缝；桌面无直发粒子的 API）。随后拍板扩特效本体。
+
+**petween `84cebfe`（上游推送）**：特效表 3→6、形状 4→7——
+
+- `heart-burst`：粉彩爱心（heart clip-path）+ 圆点，**负重力 -18 上浮**（spawn 数学 dy+gravity 天然支持，ParticleEffectSpec 注释补「负值合法=上浮」）；12 发。
+- `petal-fall`：落樱椭圆（petal）+ 纸条，强下坠慢翻滚；14 发。
+- `firework`：大半径混合爆发（dot/strip/ring），24 发（=单发上限）。
+- 新形状：`heart`（polygon 裁剪）、`ring`（**唯一非填充形状**：透明底+30% 描边空心圆，styleParticle 加 ring 早退分支）、`petal`（0.75:1.7 椭圆）。
+
+同步点三处：`ParticleEffectId` union / `PARTICLE_EFFECT_IDS`（验证器用）/ 编辑器下拉 `PARTICLE_EFFECT_OPTIONS`（爱心/落樱/烟花中文标签）。新增防漂移测试两条：渲染表 keys ↔ 枚举数组互查（particles.test + animation-definition.test 双侧）、验证器对全枚举逐 id 通过。motion-format.md 效果表与枚举行更新（implementation-notes 历史记录保持原样）。1111→1115 全绿；重建 editor.js。
+
+**petween-physics `02b582a`（连带修复）**：bump petween 指针后桌面 typecheck 红——physics 镜像 `host/types.ts:46` events 硬编码三特效 union，真实服务 6 字面量后方法双变（bivariance）两条赋值路都断（镜像→真实本就断于 tracks.property，真实→镜像原靠枚举相等撑着）。按镜像文件头自己的兼容规则（「主插件扩契约 → 镜像跟进」）上游扩六字面量；physics 发送侧零变化（bounce 动画无事件）。194 全绿。
+
+**桌面侧**：零代码改动即得六特效（渲染表数据驱动）；typecheck 干净、420 全绿，bump 双指针。真机验收：编辑器/编辑页给 transition 或 interaction 加粒子事件，下拉应有六项、新三特效正常发射（reduced-motion 或关 `advanced.particles` 时照旧不发射）。
+
+**音效插件化评估（未实施，结论沉淀）**：**可行，V1 不必动上游**。桌面 companion 可用现有观察缝自建音效层——
+
+- 逐事件时机：`subscribeAnimation` start 载荷带 `definitionId`（+source 归因 enter/interaction/external），从 host 动画库（local-server 已伺服，overlay 同源可取）拿完整定义，按 `event.at × durationMs` 自排 setTimeout 播音；settle('cancelled') 清定时器。
+- 其余触发面：`subscribePose`（含 pose-swap 事件与 flash 的换图流）、`subscribeUserPointer`（点击/双击）、`subscribeStage`（状态机换态）——五类触发面全部现有 API 覆盖。
+- 两个已知缺口：①循环动画的事件逐圈重放（timeline-scheduler 每圈 fireEvents，但 start 只发一次——音效需按 durationMs 自算圈次，random-interval 间隔拿不到）；②无逐事件观察流（拿到的是 start/settle 生命周期，不是事件本身）。上游若将来把 onEvent 扇出到 extension 面，两缺口一起闭，但 V1 音效（转场/交互/点击/换态配乐）用不到这两个角。
+- 编辑器 scrub 预览（sampleTimelineAt）本就不回放粒子，音效同理——预览静默是既有语义。
