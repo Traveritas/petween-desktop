@@ -175,3 +175,31 @@ describe('createDesktopSettingsStore', () => {
     }
   })
 })
+
+  // v0.8.0 review pin: the plain-spread bug this guards against was fixed in
+  // v0.4.0 and never pinned — Phase 18's per-plugin Apply pages now PUT
+  // exactly this shape on every 应用, so a regression would wipe sibling
+  // companions' options/enabled with all tests green.
+  it('merges companions per id: patching one companion never touches its siblings', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'petween-dsettings-'))
+    try {
+      const store = await createDesktopSettingsStore(join(dir, 's.json'))
+      store.update({ companions: { enabled: { roamer: true, 'stats-hud': true }, options: { roamer: { wander: { enabled: true } }, 'stats-hud': { columnGapPx: 24 } } } })
+
+      // The roamer plugin page applies: enabled + its own bag only.
+      const next = store.update({ companions: { enabled: { roamer: false }, options: { roamer: { mischief: { enabled: false } } } } })
+      expect(next.companions.enabled.roamer).toBe(false)
+      expect(next.companions.enabled['stats-hud']).toBe(true) // sibling enabled survives
+      expect(next.companions.options['stats-hud']).toEqual({ columnGapPx: 24 }) // sibling bag survives
+      expect(next.companions.options.roamer).toEqual({ mischief: { enabled: false } }) // per-id bag replace
+
+      // The physics-style page (own store) applies: enabled only, no options key.
+      const physics = store.update({ companions: { enabled: { 'petween-physics': true } } })
+      expect(physics.companions.enabled['petween-physics']).toBe(true)
+      expect(physics.companions.enabled.roamer).toBe(false)
+      expect(physics.companions.options.roamer).toEqual({ mischief: { enabled: false } })
+      expect(physics.companions.options['stats-hud']).toEqual({ columnGapPx: 24 })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })

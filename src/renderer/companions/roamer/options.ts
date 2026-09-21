@@ -105,6 +105,13 @@ function normalizeMischief(raw: unknown): RoamerMischiefOptions {
   }
 }
 
+/** Asset URLs are root-relative petween-asset paths by construction; a hand-
+ *  edited settings file carrying anything else (absolute http(s), file://…)
+ *  would make the overlay renderer fetch remote content — drop those. */
+function isLocalAssetUrl(url: string): boolean {
+  return /^\/petween-assets\/[A-Za-z0-9._-]+$/.test(url)
+}
+
 function normalizeContentPool(raw: unknown): RoamerContentItem[] {
   if (!Array.isArray(raw)) return []
   const items: RoamerContentItem[] = []
@@ -113,14 +120,15 @@ function normalizeContentPool(raw: unknown): RoamerContentItem[] {
     const bag = entry as Record<string, unknown>
     const id = typeof bag.id === 'string' && bag.id !== '' ? bag.id : `item-${items.length}-${Date.now()}`
     const caption = typeof bag.caption === 'string' && bag.caption !== '' ? bag.caption : undefined
-    if (bag.kind === 'image' && typeof bag.url === 'string' && bag.url !== '') {
+    if (bag.kind === 'image' && typeof bag.url === 'string' && isLocalAssetUrl(bag.url)) {
       items.push({ id, kind: 'image', url: bag.url, caption })
       continue
     }
     if (bag.kind === 'text' && typeof bag.text === 'string' && bag.text.trim() !== '') {
       items.push({ id, kind: 'text', text: bag.text, caption })
     }
-    // Anything else (missing url/text, unknown kind) is dropped silently.
+    // Anything else (missing url/text, unknown kind, non-local asset url) is
+    // dropped silently.
   }
   return items
 }
@@ -130,7 +138,8 @@ export function normalizeRoamerOptions(raw: unknown): RoamerOptions {
   const posesBag = (typeof bag.poses === 'object' && bag.poses !== null ? bag.poses : {}) as Record<string, unknown>
   const poses: RoamerOptions['poses'] = {}
   for (const key of ['walk', 'doze', 'lookAround'] as const) {
-    if (typeof posesBag[key] === 'string' && posesBag[key] !== '') poses[key] = posesBag[key]
+    // Pose override URLs face the same local-asset rule as pool images.
+    if (typeof posesBag[key] === 'string' && isLocalAssetUrl(posesBag[key])) poses[key] = posesBag[key]
   }
   return {
     wander: normalizeWander(bag.wander),

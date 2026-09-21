@@ -37,7 +37,9 @@ export interface PluginSettingsCardProps {
  */
 export interface DesktopCompanionConfigStore {
   load(): Promise<unknown>
-  save(config: unknown): Promise<void>
+  /** Persists the config; resolves to the store's normalized result so the
+   *  page can adopt it as its new baseline. */
+  save(config: unknown): Promise<unknown>
 }
 
 export interface DesktopCompanion {

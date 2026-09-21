@@ -68,6 +68,62 @@ describe('RoamerCard (controlled)', () => {
     expect(next.mischief?.enabled).toBe(false) // DEFAULT_MISCHIEF.enabled is true; the click turns it off
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
+
+  it('an image upload resolves against the LATEST bag — edits made mid-upload survive (v0.8.0 review P1)', async () => {
+    // Simulate the real parent: every onChange feeds back into value and
+    // re-renders (the controlled loop the bagRef fix relies on).
+    let value: unknown = { wander: { enabled: true } }
+    const onChange = vi.fn((next: unknown) => {
+      value = next
+    })
+    const rerender = async (): Promise<void> => {
+      await act(async () => {
+        root.render(<RoamerCard value={value} onChange={onChange} />)
+      })
+    }
+    // Deferred upload: the asset POST hangs until we release it.
+    let releaseUpload: ((body: { asset: { id: string; url: string } }) => void) | null = null
+    vi.mocked(globalThis.fetch).mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseUpload = (body) => resolve(new Response(JSON.stringify(body), { status: 200 }))
+        }) as Promise<Response>,
+    )
+    await rerender()
+
+    // Start the upload through the file input.
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (fileInput === null) throw new Error('file input missing')
+    act(() => {
+      Object.defineProperty(fileInput, 'files', {
+        value: [new File(['x'], 'pic.png', { type: 'image/png' })],
+        configurable: true,
+      })
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe('/api/petween/assets')
+
+    // Edit another field while the upload is in flight, feeding it back.
+    act(() => checkboxByLabel('游走').click())
+    await rerender()
+    expect((onChange.mock.calls[0]![0] as { wander?: { enabled?: boolean } }).wander?.enabled).toBe(false)
+    expect(checkboxByLabel('游走').checked).toBe(false) // the parent loop landed
+
+    // The upload lands — the append must build on the EDITED bag.
+    await act(async () => {
+      releaseUpload?.({ asset: { id: 'asset_1', url: '/petween-assets/asset_1.png' } })
+    })
+    expect(onChange).toHaveBeenCalledTimes(2)
+    const bag = onChange.mock.calls[1]![0] as {
+      wander?: { enabled?: boolean }
+      contentPool?: Array<{ kind: string; url: string }>
+    }
+    expect(bag.wander?.enabled).toBe(false) // mid-upload edit survived
+    expect(bag.contentPool).toEqual([
+      { id: 'pool-asset_1', kind: 'image', url: '/petween-assets/asset_1.png' },
+    ])
+  })
 })
 
 describe('StatsHudCard (controlled)', () => {

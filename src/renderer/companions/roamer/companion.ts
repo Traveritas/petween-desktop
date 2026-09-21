@@ -240,7 +240,7 @@ export function createRoamerCompanion(): DesktopCompanion {
 
       const unsubscribeStage = petween.subscribeStage((next) => {
         snapshot = next
-        pump({ type: 'stage', snapshot: next })
+        pump({ type: 'stage', snapshot: next, now: Date.now() })
       })
       const unsubscribeDrag = petween.subscribeUserDrag((phase) => pump({ type: 'drag', phase, now: Date.now() }))
 

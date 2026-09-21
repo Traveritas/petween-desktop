@@ -232,9 +232,12 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
       switch (event.type) {
         case 'stage': {
           snapshot = event.snapshot
+          // Tests inject `now` for reproducible rescheduling (the Date.now()
+          // fallback is only for the production runtime, which has it handy).
+          const stageNow = event.now ?? Date.now()
           if (event.snapshot === null) {
             // Session gone: drop any leg un-committed and re-arm on return.
-            endWalk(false, Date.now(), commands)
+            endWalk(false, stageNow, commands)
             endIdleAction(commands)
             if (mode.kind === 'peek') mode = { kind: 'rest' }
             armed = false
@@ -254,7 +257,7 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           // the upstream flash ledger clears the pose on the next
           // pose-changing target anyway, and the deformation is harmless.
           if (mode.kind === 'walking' && walkShouldYield(deps.getOptions())) {
-            endWalk(true, Date.now(), commands)
+            endWalk(true, stageNow, commands)
           }
           break
         }
@@ -391,9 +394,13 @@ export function createRoamerEngine(deps: RoamerEngineDeps): RoamerEngine {
           // abort path drops the purpose silently instead).
           const purpose = mode.kind === 'walking' ? mode.purpose : null
           endWalk(true, event.now, commands)
-          if (purpose !== null && purpose.kind === 'pull') {
+          // The options poll may have disabled mischief while the leg was in
+          // flight — the user just turned this effect off, so a payload that
+          // would linger for 25-90s must not still land.
+          const mischiefStillOn = purpose !== null && deps.getOptions().mischief.enabled
+          if (purpose !== null && mischiefStillOn && purpose.kind === 'pull') {
             commands.push({ type: 'spawn-window', kind: 'pull', edge: purpose.edge, content: purpose.content })
-          } else if (purpose !== null && purpose.kind === 'peek') {
+          } else if (purpose !== null && mischiefStillOn && purpose.kind === 'peek') {
             mode = { kind: 'peek', startedAt: event.now, durationMs: PEEK_DURATION_MS }
             commands.push({ type: 'peek-start', edge: purpose.edge })
           }

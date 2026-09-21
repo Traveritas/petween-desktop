@@ -7,7 +7,7 @@
  * `onChange`; the only side effect left is the image upload action (asset
  * creation), whose resulting pool entry still flows back through onChange.
  */
-import { type CSSProperties } from 'react'
+import { useRef, type CSSProperties } from 'react'
 import type { PluginSettingsCardProps } from '../registry'
 import { DEFAULT_IDLE, DEFAULT_MISCHIEF, DEFAULT_WANDER } from './options'
 import { type IdleActionId, type MischiefActionId, type RoamerContentItem } from './types'
@@ -55,6 +55,11 @@ const MISCHIEF_ACTION_ORDER: MischiefActionId[] = ['pullWindow', 'stickyNote', '
 export function RoamerCard(props: PluginSettingsCardProps): JSX.Element {
   const bag: OptionBag =
     typeof props.value === 'object' && props.value !== null ? (props.value as OptionBag) : {}
+  // Async continuations (the image upload below) must read the LATEST bag —
+  // the render-scope closure would roll back any edits made while the
+  // upload was in flight.
+  const bagRef = useRef(bag)
+  bagRef.current = bag
 
   const patchWander = (field: string, value: unknown): void => {
     props.onChange({ ...bag, wander: { ...(bag.wander ?? {}), [field]: value } })
@@ -88,10 +93,13 @@ export function RoamerCard(props: PluginSettingsCardProps): JSX.Element {
       .then((response) => (response.ok ? (response.json() as Promise<{ asset: { id: string; url: string } }>) : null))
       .then((body) => {
         if (body === null) return
-        patchPool([
-          ...(bag.contentPool ?? []),
-          { id: `pool-${body.asset.id}`, kind: 'image', url: body.asset.url },
-        ])
+        // Read through bagRef: the upload outlived this render, and any edits
+        // made meanwhile must survive the append.
+        const latest = bagRef.current
+        props.onChange({
+          ...latest,
+          contentPool: [...(latest.contentPool ?? []), { id: `pool-${body.asset.id}`, kind: 'image', url: body.asset.url }],
+        })
       })
       .catch(() => {})
   }

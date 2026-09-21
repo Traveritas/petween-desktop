@@ -1,6 +1,6 @@
 # 桌面版目标架构与装配指南
 
-> 基线：petween 8190ae6（`vendor/petween` submodule，= 50942a5 + 光标两修）。本文回答「桌面壳怎么把 petween 装配起来」——所有 import 路径相对本仓库根，petween 源码在 `vendor/petween/src/` 下。
+> 基线：petween 11830e5（`vendor/petween` submodule）。本文回答「桌面壳怎么把 petween 装配起来」——所有 import 路径相对本仓库根，petween 源码在 `vendor/petween/src/` 下。
 
 ## 1. 进程与窗口拓扑
 
@@ -9,14 +9,15 @@ Electron app（单实例锁）
 ├─ main 进程（Node 24）
 │   ├─ local-server.ts      # node:http，listen(0, '127.0.0.1') 随机端口
 │   │   ├─ 装配 petween host（四 store + view-store + migrate-v2 + routes + state-channel + editor-page）
-│   │   ├─ 伺服 overlay.html / 设置页（同源，petween client 的相对路径 fetch 零改动）
+│   │   ├─ 伺服 overlay.html / 设置页 / 动画工作台页（同源，petween client 的相对路径 fetch 零改动）
 │   │   └─ SSE /api/petween/events 由 attachStateChannel 白拿
 │   ├─ dsh-bridge.ts        # WS 客户端连 DSH，帧→RawSessionEvent→normalizeSessionEvent
-│   ├─ overlay-window.ts    # 透明置顶全屏窗（setBounds 铺满，非 fullscreen）
-│   ├─ settings-window.ts   # 普通窗口 loadURL('/petween-editor/')
+│   ├─ overlay-window.ts    # 透明置顶全屏窗（setBounds 铺满，非 fullscreen；companion 宿主在此进程内）
+│   ├─ settings-window.ts   # 普通窗口，壳层自建设置页（Phase 18：每页草稿+取消/应用；宠物分区 iframe 内嵌 /petween-editor/）
+│   ├─ animator-window.ts   # 独立动画工作台窗（Phase 11，按需创建，loadURL '/petween-animator/'）
 │   ├─ pointer-through.ts   # setIgnoreMouseEvents forward + hit-test + 光标轮询兜底
 │   └─ tray.ts / login-item.ts / displays.ts / updater.ts
-├─ overlay 渲染进程          # Vite renderer，直接 mount PetOverlay（绕开 client/index.ts 的 slot 注册）
+├─ overlay 渲染进程          # Vite renderer，直接 mount PetOverlay（绕开 client/index.ts 的 slot 注册）+ companions
 └─ preload                  # contextBridge 白名单 IPC（穿透切换通道、窗口控制）
 ```
 

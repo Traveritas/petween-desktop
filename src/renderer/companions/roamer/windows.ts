@@ -38,7 +38,6 @@ export interface RoamerWindowHandle {
 
 export interface RoamerWindowHost {
   spawn(spec: RoamerWindowSpawn): RoamerWindowHandle
-  closeAll(): void
   dispose(): void
 }
 
@@ -55,8 +54,9 @@ const BASE_CSS = `
   font: 13px/1.5 system-ui, 'Segoe UI', sans-serif; color: #222;
   background: #fdfdfb; overflow: hidden;
 }
-.pt-roamer-win img { display: block; max-width: 300px; max-height: 38vh; object-fit: contain; }
-.pt-roamer-win__text { padding: 10px 12px; white-space: pre-wrap; word-break: break-word; }
+.pt-roamer-win img { display: block; max-width: 300px; max-height: 42vh; object-fit: contain; }
+.pt-roamer-win__text { padding: 10px 12px; white-space: pre-wrap; word-break: break-word; max-height: 30vh; overflow: hidden; }
+.pt-roamer-win--note .pt-roamer-win__text { max-height: 18vh; }
 .pt-roamer-win__caption {
   padding: 4px 10px 6px; font-size: 11px; color: #666;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
@@ -132,9 +132,16 @@ export function createRoamerWindowHost(): RoamerWindowHost {
     }
   }
 
-  /** Clamp a top so the window stays fully on screen whatever the anchor. */
-  const clampTop = (top: number, estimatedHeight: number, viewportHeight: number): number =>
-    Math.max(8, Math.min(top, viewportHeight - estimatedHeight - 8))
+  /**
+   * Clamp a top so the window stays fully on screen whatever the anchor.
+   * The budget mirrors the CSS caps above (img ≤ 42vh + caption line ≈ 40px)
+   * — the old flat 160px estimate let tall images hang off the bottom when
+   * the pet anchored low.
+   */
+  const clampTop = (top: number, viewportHeight: number): number => {
+    const budget = Math.ceil(viewportHeight * 0.42) + 40
+    return Math.max(8, Math.min(top, viewportHeight - budget - 8))
+  }
 
   const spawn = (spec: RoamerWindowSpawn): RoamerWindowHandle => {
     const el = document.createElement('div')
@@ -154,11 +161,7 @@ export function createRoamerWindowHost(): RoamerWindowHost {
       // Pulled window: rest just inside the edge, at the pet's height.
       const edge = spec.edge ?? 'right'
       el.style.left = edge === 'left' ? '12px' : `${Math.max(12, spec.viewport.width - 312)}px`
-      el.style.top = `${clampTop(
-        Math.round(spec.anchor.y + spec.anchor.height / 2 - 40),
-        160,
-        spec.viewport.height,
-      )}px`
+      el.style.top = `${clampTop(Math.round(spec.anchor.y + spec.anchor.height / 2 - 40), spec.viewport.height)}px`
       enterClass = edge === 'left' ? 'pt-roamer-enter-left' : 'pt-roamer-enter-right'
     }
     el.classList.add(enterClass)
@@ -190,12 +193,6 @@ export function createRoamerWindowHost(): RoamerWindowHost {
 
   return {
     spawn,
-    closeAll() {
-      for (const entry of [...entries]) {
-        if (entry.timer !== null) clearTimeout(entry.timer)
-        detach(entry)
-      }
-    },
     dispose() {
       if (disposed) return
       disposed = true

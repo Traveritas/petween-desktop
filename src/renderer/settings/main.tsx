@@ -21,11 +21,11 @@
  *   through that store — same route the self-managed card used, so the
  *   overlay-side propagation story is unchanged.
  */
-import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { DesktopSettings } from '../../main/desktop-settings'
 import { listCompanions, type DesktopCompanion } from '../companions'
-import { jsonDeepEqual } from './draft'
+import { SettingsPage, type PageApi } from './page-draft'
 import './settings.css'
 
 /** A page id: a top section or `plugin:<companion id>`. */
@@ -79,188 +79,6 @@ async function putSettings(patch: Record<string, unknown>): Promise<DesktopSetti
     body: JSON.stringify(patch),
   })
   return body.settings
-}
-
-/** The handle a page registers with the App for the leave-dirty guard. */
-interface PageApi {
-  onDirtyChange(dirty: boolean): void
-  registerApply(apply: (() => Promise<boolean>) | null): void
-}
-
-interface PageDraft<T> {
-  draft: T | null
-  dirty: boolean
-  saving: boolean
-  error: string | null
-  set(next: T): void
-  revert(): void
-  apply(): Promise<boolean>
-  retryLoad(): void
-}
-
-/**
- * One page's draft lifecycle: load (with backoff retry) → baseline + draft;
- * edits only touch the draft; apply() commits through the caller's sink and
- * adopts the server-normalized result as the new baseline.
- */
-function usePageDraft<T>(options: {
-  load: () => Promise<T>
-  /** Commits the draft; resolves to the fresh baseline (server-normalized). */
-  apply: (draft: T) => Promise<T>
-  api: PageApi
-}): PageDraft<T> {
-  const optionsRef = useRef(options)
-  optionsRef.current = options
-  const [baseline, setBaseline] = useState<T | null>(null)
-  const baselineRef = useRef<T | null>(null)
-  baselineRef.current = baseline
-  const [draft, setDraft] = useState<T | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [reloadSeq, setReloadSeq] = useState(0)
-
-  useEffect(() => {
-    let alive = true
-    let attempt = 0
-    const run = (): void => {
-      void optionsRef.current.load().then(
-        (value) => {
-          if (!alive) return
-          setBaseline(value)
-          setDraft(structuredClone(value))
-          setError(null)
-        },
-        (loadError: unknown) => {
-          if (!alive) return
-          attempt += 1
-          // A stuck "加载中…" page helps nobody — retry with backoff, then
-          // surface the reason in the draft bar (with a 重试 button).
-          if (attempt < 5) {
-            setTimeout(run, 500 * attempt)
-            return
-          }
-          setError(loadError instanceof Error ? loadError.message : String(loadError))
-        },
-      )
-    }
-    run()
-    return () => {
-      alive = false
-    }
-  }, [reloadSeq])
-
-  const set = useCallback((next: T): void => setDraft(next), [])
-
-  const revert = useCallback((): void => {
-    if (baselineRef.current !== null) setDraft(structuredClone(baselineRef.current))
-  }, [])
-
-  const apply = useCallback(async (): Promise<boolean> => {
-    if (draft === null || saving) return false
-    setSaving(true)
-    setError(null)
-    try {
-      const fresh = await optionsRef.current.apply(draft)
-      setBaseline(fresh)
-      setDraft(structuredClone(fresh))
-      return true
-    } catch (applyError) {
-      setError(applyError instanceof Error ? applyError.message : String(applyError))
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }, [draft, saving])
-
-  const dirty = draft !== null && baseline !== null && !jsonDeepEqual(draft, baseline)
-
-  useEffect(() => {
-    optionsRef.current.api.onDirtyChange(dirty)
-  }, [dirty])
-
-  useEffect(() => {
-    const { registerApply } = optionsRef.current.api
-    registerApply(apply)
-    return () => registerApply(null)
-  }, [apply])
-
-  return { draft, dirty, saving, error, set, revert, apply, retryLoad: () => setReloadSeq((n) => n + 1) }
-}
-
-function DraftBar(props: {
-  dirty: boolean
-  saving: boolean
-  error: string | null
-  loadFailed: boolean
-  onApply: () => void
-  onRevert: () => void
-  onRetry: () => void
-}): JSX.Element {
-  const state = props.loadFailed
-    ? `加载失败：${props.error ?? '未知错误'}`
-    : props.saving
-      ? '正在保存…'
-      : props.error !== null
-        ? `保存失败：${props.error}`
-        : props.dirty
-          ? '有未保存的更改'
-          : '更改将在点击「应用」后生效'
-  return (
-    <div className="draftBar">
-      <span className={`draftState ${props.error !== null ? 'error' : ''}`}>{state}</span>
-      {props.loadFailed ? (
-        <button type="button" onClick={props.onRetry}>
-          重试
-        </button>
-      ) : (
-        <span className="draftActions">
-          <button type="button" disabled={!props.dirty || props.saving} onClick={props.onRevert}>
-            取消
-          </button>
-          <button type="button" className="primary" disabled={!props.dirty || props.saving} onClick={props.onApply}>
-            应用
-          </button>
-        </span>
-      )}
-    </div>
-  )
-}
-
-/**
- * The shell every draftable page renders into: card + draft bar. Children
- * only mount once the slice has loaded, so their hooks see a real draft.
- */
-function SettingsPage<T>(props: {
-  title: string
-  hint?: string
-  load: () => Promise<T>
-  apply: (draft: T) => Promise<T>
-  api: PageApi
-  children: (draft: T, set: (next: T) => void) => ReactNode
-}): JSX.Element {
-  const page = usePageDraft<T>({ load: props.load, apply: props.apply, api: props.api })
-  return (
-    <div className="page">
-      <section className="card">
-        <h2>{props.title}</h2>
-        {props.hint !== undefined && <p className="sectionHint">{props.hint}</p>}
-        {page.draft === null ? (
-          <p className="sectionHint">{page.error !== null ? '该页设置未能加载。' : '加载中…'}</p>
-        ) : (
-          props.children(page.draft, page.set)
-        )}
-      </section>
-      <DraftBar
-        dirty={page.dirty}
-        saving={page.saving}
-        error={page.error}
-        loadFailed={page.draft === null && page.error !== null}
-        onApply={() => void page.apply()}
-        onRevert={page.revert}
-        onRetry={page.retryLoad}
-      />
-    </div>
-  )
 }
 
 function Toggle(props: { checked: boolean; onChange: (next: boolean) => void; label: string; hint?: string }): JSX.Element {
@@ -471,6 +289,13 @@ function ConnectBody(props: {
   status: StatusResponse | null
 }): JSX.Element {
   const [portDraft, setPortDraft] = useState(String(props.slice.dsh.port))
+  // Follow external port changes (取消 revert / server normalization on
+  // 应用) — typing never lands in slice.dsh.port until blur, so this only
+  // fires on changes the input didn't make itself. Without it a cancelled
+  // edit would sit in the box and re-enter the draft on the next blur.
+  useEffect(() => {
+    setPortDraft(String(props.slice.dsh.port))
+  }, [props.slice.dsh.port])
   const [probe, setProbe] = useState<string | null>(null)
   const dsh = props.status?.dsh
   const patchConnector = (slug: 'zcode' | 'cc' | 'codex', partial: Partial<ConnectorUserSettings>): void => {
@@ -714,7 +539,10 @@ function PluginPage(props: { companion: DesktopCompanion; api: PageApi }): JSX.E
       apply={async (draft) => {
         // Own-store bag first: it is the sink most likely to reject
         // (validation), and a retry after a settings failure is idempotent.
-        if (companion.configStore !== undefined) await companion.configStore.save(draft.bag)
+        // The store resolves its normalized result — adopt it rather than
+        // trusting the draft bag.
+        let bag: unknown = draft.bag
+        if (companion.configStore !== undefined) bag = await companion.configStore.save(draft.bag)
         const settings = await putSettings({
           companions: {
             enabled: { [companion.id]: draft.enabled },
@@ -723,7 +551,8 @@ function PluginPage(props: { companion: DesktopCompanion; api: PageApi }): JSX.E
         })
         return {
           enabled: settings.companions.enabled[companion.id] !== false,
-          bag: companion.configStore !== undefined ? draft.bag : (settings.companions.options[companion.id] ?? {}),
+          bag:
+            companion.configStore !== undefined ? bag : (settings.companions.options[companion.id] ?? {}),
         }
       }}
       api={props.api}
@@ -858,6 +687,9 @@ function App(): JSX.Element {
       setPendingNav(null) // stay here; the page's own bar shows the error
       return
     }
+    // The page unmounts on switch — its dirty effect cannot report anymore,
+    // so reset explicitly (same as confirmDiscard).
+    setDirty(false)
     setPendingNav(null)
     setActive(target)
   }
@@ -940,7 +772,7 @@ function App(): JSX.Element {
             return <PluginPage key={companion.id} companion={companion} api={apiRef.current} />
           })()}
         {active === 'general' && <GeneralSection status={status} />}
-        {pendingNav !== null && (
+        {pendingNav !== null && dirty && (
           <div className="navGuard">
             <span className="navGuardText">当前页面有未保存的更改</span>
             <span className="navGuardActions">

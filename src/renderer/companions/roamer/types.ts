@@ -78,7 +78,10 @@ export interface RoamerOptions {
  * runtime (companion.ts) owns the mechanics (lease, frames, visuals).
  */
 export type RoamerEvent =
-  | { type: 'stage'; snapshot: StageSnapshot | null }
+  /** `now` is optional only for 'stage' (added post-Phase-17): the engine
+   * falls back to Date.now() when omitted — tests inject it to keep the
+   * yield/teardown rescheduling reproducible. */
+  | { type: 'stage'; snapshot: StageSnapshot | null; now?: number }
   | { type: 'tick'; now: number }
   | { type: 'drag'; phase: 'start' | 'end'; now: number }
   | { type: 'leg-complete'; now: number }

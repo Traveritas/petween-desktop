@@ -132,7 +132,7 @@
 
 ## 后续增强（MVP 后，按价值排序）
 
-1. **连接器**：~~zcode~~（✅ 2026-09-18 Phase 9 落地，见下文与 docs/06；架构与传输家族就此定型——curl cfg 端口发现 + 合并安装 + watchdog 模板）→ Claude Code（2026-09-14 已调研：hooks http handler，6/6 状态显式覆盖；hooks 面与 zcode 同构，可复用大半）→ opencode（SSE，状态枚举近 1:1）→ Codex/Gemini/Cursor
+1. **连接器**：~~zcode~~（✅ 2026-09-18 Phase 9 落地，见下文与 docs/06；架构与传输家族就此定型——curl cfg 端口发现 + 合并安装 + watchdog 模板）→ ~~Claude Code~~（✅ 2026-09-20 Phase 15 落地，docs/07）→ ~~Codex~~（✅ 2026-09-20 Phase 16 落地，docs/08）→ opencode（SSE，状态枚举近 1:1）→ Gemini/Cursor
 2. petween 侧 P0-P2 补丁回流（`dependencies` 声明、`./host` 装配桶 exports——见 02 号文档 §6；现有三仓库源码消费，P0 越发值得）
 3. 「跟随 DSH 当前会话」状态源（替代 aggregate）
 4. 救援热键可配置（现为固定候选链 P/I/U）
@@ -157,7 +157,7 @@
 ### 工作分解（A/B 可并行）
 
 **8A companion 宿主机制（✅）**
-- [x] `src/renderer/companions/registry.ts`：`DesktopCompanion` 接口（`{ id, displayName, description?, SettingsCard?, init(ctx): dispose? }`，ctx = petween 单例）+ 注册表 + try/catch 崩溃隔离
+- [x] `src/renderer/companions/registry.ts`：`DesktopCompanion` 接口（`{ id, displayName, description?, SettingsCard?, init(ctx): dispose? }`，ctx = petween 单例）+ 注册表 + try/catch 崩溃隔离。**Phase 18 起 SettingsCard 受控化（`{value, onChange}` 纯控制、卡内零网络）+ 可选 `configStore`，见 Phase 18 节与 registry.ts 头注释**
 - [x] desktop-settings 加 `companions: { enabled: Record<string, boolean> }`（缺省=启用）
 - [x] 设置页「插件」分区：toggle + SettingsCard 托管
 - [x] overlay 入口按设置挂载（3s 轮询差量重挂载）；单测 5 用例
@@ -679,9 +679,9 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 - 所有打断路径（drag/hidden/会话丢失/grace 阀）统一「弃则不 commit、完成则 commit 后 release（release 必须晚于 commit 落地，20s 超时兜底）」；endWalk 一律从结束时刻重排暂停（修复批 1 测试抓到的「过期 nextWanderAt 立即再走」bug）。
 - 选项轮询 3s（stats-hud pullOptions 模式，改设置不重挂）；`normalizeRoamerOptions` 双侧共用（卡片与 runtime 同源）。
 
-### 测试（375 → 413，+38）
+### 测试（376 → 413，+37；CI 修复 +1 已入账）
 
-`tests/companions/roamer-engine.test.ts`（node，28 用例：游走生命周期/门控矩阵/打断/租约拒绝重试/会话重建/grace 阀/待机调度与取消/mischief 四动作/池空静默/normalize）；`tests/companions/roamer-windows.test.ts`（jsdom + fake timers，8 用例：拉窗左右边缘定位与滑入类/便签皮肤与停留差/DOM 移除时序/dispose 清场）；`tests/main/roamer-assembly.test.ts`（真 route table + host service，3 用例：注册落地/幂等/不覆盖用户编辑）。
+`tests/companions/roamer-engine.test.ts`（node，28 用例：游走生命周期/门控矩阵/打断/租约拒绝重试/会话重建/grace 阀/待机调度与取消/mischief 四动作/池空静默/normalize）；`tests/companions/roamer-windows.test.ts`（jsdom + fake timers，6 用例：拉窗左右边缘定位与滑入类/便签皮肤与停留差/DOM 移除时序/dispose 清场）；`tests/main/roamer-assembly.test.ts`（真 route table + host service，3 用例：注册落地/幂等/不覆盖用户编辑）。
 
 ### 待用户真机验收清单
 
@@ -697,7 +697,7 @@ loopback 无鉴权、本机进程等权两条 v0.1.0 边界仍然成立；浏览
 
 - 便签/拉窗位置避让（当前随机带不避任务栏/宠物本体）；拉窗可交互化（穿透协议三处扩展）；姿势覆盖的上传入口 UI（当前仅 options 直写，批 3 卡片已有内容池上传、行为姿势上传未做卡片控件）；走路朝向（需上游开 pose 镜像缝，回流项）；多显示器游走（overlay 仅主屏的既有约束）；便签文本池与拉窗池分离。
 
-## Phase 18：设置窗重构——插件分页 + 每页 取消/应用（2026-09-21 代码完成；真机验收待用户）
+## Phase 18：设置窗重构——插件分页 + 每页 取消/应用（2026-09-21 代码完成；✅ 同日真机验收通过）
 
 用户两项拍板：①插件分类挪到导航最底部、点击展开各插件子页、每插件独立页面（设置内容**始终展示**，可先配置后启用）；②保存模型统一为 Windows 属性对话框式 取消/应用（**每页独立**草稿与底栏，切页有脏警告：留下 / 丢弃更改并离开 / 保存并离开）。
 
@@ -766,3 +766,42 @@ Phase 18 验收通过后用户追问：宠物页能否同样 取消/应用。核
 - 其余触发面：`subscribePose`（含 pose-swap 事件与 flash 的换图流）、`subscribeUserPointer`（点击/双击）、`subscribeStage`（状态机换态）——五类触发面全部现有 API 覆盖。
 - 两个已知缺口：①循环动画的事件逐圈重放（timeline-scheduler 每圈 fireEvents，但 start 只发一次——音效需按 durationMs 自算圈次，random-interval 间隔拿不到）；②无逐事件观察流（拿到的是 start/settle 生命周期，不是事件本身）。上游若将来把 onEvent 扇出到 extension 面，两缺口一起闭，但 V1 音效（转场/交互/点击/换态配乐）用不到这两个角。
 - 编辑器 scrub 预览（sampleTimelineAt）本就不回放粒子，音效同理——预览静默是既有语义。
+
+## v0.8.0 里程碑评审（2026-09-21，六路子智能体综合评审）
+
+范围：`58bc8fd..c759d0b`（Phase 17 roamer 四批 + Phase 18 设置窗重构 + 粒子/文案两 bump）+ 对应 submodule 变更（petween `8190ae6..11830e5`、petween-physics `0a83a24..760fb37`；v0.7.1/7.2 各自带过评审不重审）。六路：主进程 / 渲染-设置窗 / 渲染-roamer / 测试 / 文档 / 安全（roamer 是首次评审，渲染层拆两路）。
+
+**结论：零 P0、6 P1 全修、12 项 P2 当场修或钉测，其余入 backlog。**
+
+### P1（全部当场修复）
+
+1. **apply 途中编辑被服务端回声吞掉**（设置窗路）：旧 useSettings 的 in-flight 合并保护在重写中丢失——PUT 在飞时的继续编辑会被 `setDraft(fresh)` 覆盖且 dirty 翻 false（守卫不再拦）。修复 = submitted 引用比对，编辑未落地时只更新 baseline 不动 draft（`page-draft.tsx`，钉测 `page-draft.test.tsx`）。
+2. **「保存并离开」成功后 App.dirty 滞留 true**：页面卸载后无人上报 false，宠物/通用页此后每次导航弹假守卫、「保存并离开」静默不保存。修复 = 成功分支显式 `setDirty(false)`（与丢弃路径对齐）。
+3. **ConnectBody 端口草稿不随「取消」回滚**：portDraft 只初始化一次，取消后输入框残留废弃值、blur 会复活已取消的编辑。修复 = 端口变化回同步 effect。
+4. **RoamerCard.addImage 过期闭包**（设置窗/roamer/测试三路同报）：上传在飞时的其他编辑被旧 bag 整包回滚。修复 = bagRef 读最新包（钉测 = deferred fetch 竞态用例，含父组件回灌闭环）。
+5. **Phase 18 保存模型零测试且入口文件不可 import**：main.tsx 顶层 createRoot 锁死可测性。修复 = 抽取 `page-draft.tsx` + 5 用例 hook 测试（装载/脏检/回滚/in-flight 存活/归一化采纳/退避重试）。
+6. **companions per-id 合并无回归钉测**（v0.4.0 修过的 bug，Phase 18 把它变成每个插件页 apply 的热路径）：补 store 级钉测（兄弟插件 options/enabled 存活 + enabled-only patch 不动 options + per-id 整包替换）。
+
+### P2（当场修/钉）
+
+- 守卫条在页面变干净后不收起（渲染条件补 `&& dirty`）；physics apply 双出口非原子的已知取舍维持文档化（重试幂等）+ configStore.save 改为返回归一化结果（baseline 采纳服务端值而非信任 draft）；physics 400 诊断透出（configStore 读响应体 error.message，上游 `6e1ef02`）。
+- roamer：拉窗顶部钳制改视口比例预算（CSS img ≤42vh/文本 ≤30vh 与 clampTop 同源，修低锚点出屏）；stage 事件可选 `now` 注入（引擎两处 Date.now() 收口）；leg-complete 投递 mischief 载荷前复查开关（用户刚关掉的效果不再落地）；内容池/姿势 URL 白名单 `/petween-assets/`（防恶意配置让 overlay 拉外网内容）；closeAll 死码删除。
+- 安全：physics 写栅栏 `same-site` 短路放行对齐主插件语义（落穿 Origin↔Host 比对，上游 `6e1ef02` + 钉测——当前无浏览器可达写路径，属加固非堵洞）。
+- 测试：受控卡「零 fetch」契约口径收窄（资产上传为明示例外）；addImage 竞态钉测转绿。
+
+### 文档（当场修）
+
+docs/02 拓扑行（设置窗自建页+iframe、animator 窗、companion 宿主、基线行）；docs/05 Phase 18 验收 ✅、Phase 17 测试数字（windows 6 用例、376→413）、后续增强 CC/Codex 划线、Phase 8 受控卡前向指针；AGENTS 决策速览刷新（见下）+ Phase 13/14 状态行 + 导读行；README 补设置模型与粒子六特效两特性。
+
+### Backlog（评审产出，按价值排）
+
+1. **roamer runtime（companion.ts）行为测试**——租约纪律/commit 次序/重闪还原/20s 兜底全住在零测试的那一半（评审给出四例设计：dispose×commit 交叠不双 release、abort 路径重闪、t≥1 先 apply、悬挂期新 walk 得 lease-denied）。
+2. engine 补测：peek 三处中止复位、退化视口钳制、idle 完成同 tick fall-through、lease-denied 丢弃拉窗载荷。
+3. tests 目录纳入 typecheck（tsconfig include）——.tsx 测试零类型检查的强转漂移风险。
+4. roamer-assembly 逐条 catch（首条失败不中止剩余注册）；20s 超时竞速的 timer 不清除 nit。
+5. 设置窗守卫条覆盖 iframe 脏状态（postMessage 桥）、脏关窗确认——Phase 18 后置项顺延。
+6. 主进程路遗留：physics config hub overlay 侧一次性 memoized load 不轮询（Phase 8 起既有，重启才生效——「companion 重挂载预热」邻域）。
+
+### 里程碑动作
+
+P1×6 + P2×12 + 文档批全部当场修复；桌面 420→427 用例全绿（+7：page-draft 5 / per-id 合并钉测 1 / addImage 竞态 1；上游 petween-physics 194→195 含 same-site 钉测）；typecheck 与渲染构建全绿；打标签 v0.8.0。
