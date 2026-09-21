@@ -10,7 +10,7 @@
 import { useRef, type CSSProperties } from 'react'
 import type { PluginSettingsCardProps } from '../registry'
 import { DEFAULT_IDLE, DEFAULT_MISCHIEF, DEFAULT_WANDER } from './options'
-import { type IdleActionId, type MischiefActionId, type RoamerContentItem } from './types'
+import { type IdleActionId, type MischiefActionId, type PoseOverrideKey, type RoamerContentItem } from './types'
 
 interface OptionBag {
   wander?: {
@@ -35,8 +35,23 @@ interface OptionBag {
     noteLingerMs?: number
   }
   contentPool?: RoamerContentItem[]
+  poses?: Partial<Record<PoseOverrideKey, string>>
   [key: string]: unknown
 }
+
+/** Per-action picture overrides: upload your own pet's variants. */
+const POSE_LABELS: Record<PoseOverrideKey, string> = {
+  walk: '走路',
+  dash: '冲刺',
+  doze: '打盹',
+  lookAround: '张望',
+  sway: '晃悠',
+  shake: '抖毛',
+  peek: '探头',
+  pull: '拉窗',
+  note: '便签',
+}
+const POSE_ORDER: PoseOverrideKey[] = ['walk', 'dash', 'doze', 'lookAround', 'sway', 'shake', 'peek', 'pull', 'note']
 
 const IDLE_ACTION_LABELS: Record<IdleActionId, string> = {
   doze: '打盹',
@@ -110,6 +125,26 @@ export function RoamerCard(props: PluginSettingsCardProps): JSX.Element {
     const trimmed = text.trim()
     if (trimmed === '') return
     patchPool([...(bag.contentPool ?? []), { id: `pool-text-${Date.now()}`, kind: 'text', text: trimmed }])
+  }
+
+  /** Upload a per-action pose picture through the petween asset pipeline. */
+  const setPose = (key: PoseOverrideKey, file: File): void => {
+    const form = new FormData()
+    form.append('file', file)
+    void fetch('/api/petween/assets', { method: 'POST', body: form })
+      .then((response) => (response.ok ? (response.json() as Promise<{ asset: { id: string; url: string } }>) : null))
+      .then((body) => {
+        if (body === null) return
+        // bagRef: the upload outlived this render (same reasoning as addImage).
+        props.onChange({ ...bagRef.current, poses: { ...(bagRef.current.poses ?? {}), [key]: body.asset.url } })
+      })
+      .catch(() => {})
+  }
+
+  const clearPose = (key: PoseOverrideKey): void => {
+    const next = { ...(bag.poses ?? {}) }
+    delete next[key]
+    props.onChange({ ...bag, poses: next })
   }
 
   const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0', flexWrap: 'wrap' }
@@ -333,6 +368,41 @@ export function RoamerCard(props: PluginSettingsCardProps): JSX.Element {
           }}
         />
       </div>
+      <div style={rowStyle}>
+        <span className="rowHint" style={labelStyle}>动作图片</span>
+        <span className="rowHint">给各动作配你自己宠物的专属图（未配则用默认动画表现；冲刺未配时沿用走路图）</span>
+      </div>
+      {POSE_ORDER.map((key) => {
+        const url = bag.poses?.[key]
+        return (
+          <div key={key} style={{ ...rowStyle, marginLeft: 12 }}>
+            <span className="rowHint" style={{ flex: '0 0 3em' }}>{POSE_LABELS[key]}</span>
+            {url !== undefined ? (
+              <img src={url} alt="" style={{ maxWidth: 48, maxHeight: 40, objectFit: 'contain', borderRadius: 4 }} />
+            ) : (
+              <span className="rowHint" style={{ opacity: 0.55 }}>未设置</span>
+            )}
+            <label className="rowHint" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {url !== undefined ? '更换' : '上传'}
+              <input
+                type="file"
+                accept="image/*"
+                style={{ maxWidth: 160 }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  if (file !== undefined) setPose(key, file)
+                }}
+              />
+            </label>
+            {url !== undefined && (
+              <button type="button" onClick={() => clearPose(key)}>
+                清除
+              </button>
+            )}
+          </div>
+        )
+      })}
       <p className="rowHint">仅闲时=无 Agent 会话忙碌时才行动；永远=任何状态都行动（姿势仍显示工作状态）。拖住宠物会立即让它停下。</p>
     </div>
   )

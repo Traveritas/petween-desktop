@@ -62,11 +62,23 @@ export interface RoamerContentItem {
 }
 
 /**
- * Per-behavior pose overrides (user-uploaded art of THEIR pet, stored as
- * asset URLs). Empty = the motion-only default (no image swap), because
- * plugin-shipped generic art would clash with user pet packages.
+ * Per-ACTION pose overrides (user-uploaded art of THEIR pet, stored as
+ * asset URLs): every roamer behavior can swap in its own picture for its
+ * duration. Empty = the motion-only default (no image swap), because
+ * plugin-shipped generic art would clash with user pet packages. `dash`
+ * falls back to `walk` when unset; the mischief flashes (peek/pull/note)
+ * are short self-restoring moments.
  */
-export type PoseOverrideKey = 'walk' | 'doze' | 'lookAround'
+export type PoseOverrideKey =
+  | 'walk'
+  | 'dash'
+  | 'doze'
+  | 'lookAround'
+  | 'sway'
+  | 'shake'
+  | 'peek'
+  | 'pull'
+  | 'note'
 
 export interface RoamerOptions {
   wander: RoamerWanderOptions

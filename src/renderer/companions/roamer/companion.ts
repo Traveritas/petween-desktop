@@ -27,6 +27,7 @@ import { normalizeRoamerOptions } from './options'
 import {
   DASH_ANIMATION_ID,
   IDLE_ACTION_ANIMATION_IDS,
+  PEEK_DURATION_MS,
   PEEK_LEFT_ANIMATION_ID,
   PEEK_RIGHT_ANIMATION_ID,
   WALK_BOB_ANIMATION_ID,
@@ -54,7 +55,7 @@ export function createRoamerCompanion(): DesktopCompanion {
     id: ROAMER_ID,
     displayName: '自主行为（游荡 / 待机 / 捣乱）',
     description:
-      '闲时宠物自己在桌面上游荡（可配成永远）；后续批次加入待机小动作与捣乱行为。纯视觉行为，不抢鼠标、不影响点击穿透。',
+      '闲时（或永远）宠物自己在桌面上游荡、打盹张望等待机小动作，还会捣乱：拉内容窗、贴便签、冲过屏幕、探头窥视。每个动作可配自己宠物的专属图片；纯视觉行为，不抢鼠标、不影响点击穿透。',
     SettingsCard: RoamerCard,
     init({ petween }: DesktopCompanionContext) {
       let disposed = false
@@ -135,10 +136,13 @@ export function createRoamerCompanion(): DesktopCompanion {
             : { x: plan.from.x, y: plan.from.y }
         const startedPerf = performance.now()
         // Gait picks the loop skin: the casual bob, or the leaning dash run.
-        // The pose override (if the user uploaded one) rides on top either way.
+        // The pose override (if the user uploaded one) rides on top either
+        // way — dash falls back to the walk pose when it has no picture of
+        // its own.
         walkAnim = petween.playAnimation(gait === 'dash' ? DASH_ANIMATION_ID : WALK_BOB_ANIMATION_ID)
-        if (options.poses.walk !== undefined) {
-          walkFlashActive = petween.flashAsset({ url: options.poses.walk }, plan.durationMs + 500)
+        const walkOverride = gait === 'dash' ? options.poses.dash ?? options.poses.walk : options.poses.walk
+        if (walkOverride !== undefined) {
+          walkFlashActive = petween.flashAsset({ url: walkOverride }, plan.durationMs + 500)
         }
         const step = (): void => {
           const active = leg
@@ -164,8 +168,8 @@ export function createRoamerCompanion(): DesktopCompanion {
 
       const startIdleAction = (action: IdleActionId, durationMs: number): void => {
         idleAnim = petween.playAnimation(IDLE_ACTION_ANIMATION_IDS[action])
-        // Pose overrides exist for doze/lookAround; sway/shake are motion-only.
-        const override = action === 'doze' || action === 'lookAround' ? options.poses[action] : undefined
+        // Every idle action can carry its own picture (options.poses).
+        const override = options.poses[action]
         if (override !== undefined) {
           idleFlashActive = petween.flashAsset({ url: override }, durationMs + 200)
         }
@@ -178,6 +182,13 @@ export function createRoamerCompanion(): DesktopCompanion {
         // (snapshot null) has neither — skip the effect entirely.
         const current = snapshot
         if (current === null) return
+        // A short "heave/placement" flash — the moment of dragging the
+        // content out. Self-restoring by holdMs; too brief to need the
+        // interrupt-restore bookkeeping the walk/idle flashes have.
+        const momentPose = command.kind === 'note' ? options.poses.note : options.poses.pull
+        if (momentPose !== undefined) {
+          petween.flashAsset({ url: momentPose }, 1200)
+        }
         windowHost.spawn({
           kind: command.kind,
           edge: command.edge,
@@ -229,7 +240,13 @@ export function createRoamerCompanion(): DesktopCompanion {
             spawnWindow(command)
             break
           case 'peek-start':
-            // The lean-past-edge motion; self-finishing (once), no flash.
+            // The lean-past-edge motion; self-finishing (once). An optional
+            // peek picture rides flashAsset for the lean's duration —
+            // self-restoring by holdMs (the engine's peek reset emits no
+            // command, so there is no interrupt hook to restore through).
+            if (options.poses.peek !== undefined) {
+              petween.flashAsset({ url: options.poses.peek }, PEEK_DURATION_MS + 200)
+            }
             petween.playAnimation(command.edge === 'left' ? PEEK_LEFT_ANIMATION_ID : PEEK_RIGHT_ANIMATION_ID)
             break
         }

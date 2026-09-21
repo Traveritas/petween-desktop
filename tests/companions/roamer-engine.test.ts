@@ -454,7 +454,7 @@ describe('normalizeRoamerOptions', () => {
         { id: 'd', kind: 'text', text: '   ' }, // blank → dropped
         'junk',
       ],
-      poses: { walk: '/petween-assets/w', doze: '' },
+      poses: { walk: '/petween-assets/w', doze: '', peek: '/petween-assets/p', note: '/evil/http://x' },
     })
     expect(options.wander.enabled).toBe(false)
     expect(options.wander.when).toBe('always')
@@ -463,6 +463,7 @@ describe('normalizeRoamerOptions', () => {
     expect(options.wander.pauseMinMs).toBeLessThanOrEqual(options.wander.pauseMaxMs)
     expect(options.contentPool).toHaveLength(2)
     expect(options.contentPool[0]).toMatchObject({ id: 'a', kind: 'image' })
-    expect(options.poses).toEqual({ walk: '/petween-assets/w' })
+    // every action key is accepted; blanks and non-local URLs are dropped
+    expect(options.poses).toEqual({ walk: '/petween-assets/w', peek: '/petween-assets/p' })
   })
 })

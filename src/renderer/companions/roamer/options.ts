@@ -44,6 +44,19 @@ export const DEFAULT_MISCHIEF: RoamerMischiefOptions = {
 const IDLE_ACTION_IDS: readonly IdleActionId[] = ['doze', 'lookAround', 'sway', 'shake']
 const MISCHIEF_ACTION_IDS: readonly MischiefActionId[] = ['pullWindow', 'stickyNote', 'dashAcross', 'edgePeek']
 
+/** Every pose-override key the normalizer accepts (types.PoseOverrideKey). */
+const POSE_OVERRIDE_KEYS = [
+  'walk',
+  'dash',
+  'doze',
+  'lookAround',
+  'sway',
+  'shake',
+  'peek',
+  'pull',
+  'note',
+] as const
+
 const asBool = (value: unknown, fallback: boolean): boolean =>
   typeof value === 'boolean' ? value : fallback
 
@@ -142,7 +155,7 @@ export function normalizeRoamerOptions(raw: unknown): RoamerOptions {
   const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
   const posesBag = (typeof bag.poses === 'object' && bag.poses !== null ? bag.poses : {}) as Record<string, unknown>
   const poses: RoamerOptions['poses'] = {}
-  for (const key of ['walk', 'doze', 'lookAround'] as const) {
+  for (const key of POSE_OVERRIDE_KEYS) {
     // Pose override URLs face the same local-asset rule as pool images.
     if (typeof posesBag[key] === 'string' && isLocalAssetUrl(posesBag[key])) poses[key] = posesBag[key]
   }
