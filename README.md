@@ -1,8 +1,10 @@
+> **本仓库已停止维护并归档。** Petween 已在新仓库 [petween](https://github.com/Traveritas/petween) 重做：跨 agent（Claude Code、Codex 等）的独立桌面宠物，插件化、支持多只宠物；桌面版的功能已并入其中。文中提到的 petween 插件现名 [petween-dsh](https://github.com/Traveritas/petween-dsh)。
+
 # Petween Desktop
 
 [![CI](https://github.com/Traveritas/petween-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/Traveritas/petween-desktop/actions/workflows/ci.yml)
 
-Petween 的独立 Windows 桌面版：把 [petween](https://github.com/Traveritas/petween)（桌宠动画中间件）以零改动装配级复用装进 Electron——透明置顶窗口里的桌宠，**实时联动你正在用的 AI 编码代理**。
+Petween 的独立 Windows 桌面版：把 [petween](https://github.com/Traveritas/petween-dsh)（桌宠动画中间件）以零改动装配级复用装进 Electron——透明置顶窗口里的桌宠，**实时联动你正在用的 AI 编码代理**。
 
 ## 它能做什么
 
